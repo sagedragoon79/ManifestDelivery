@@ -1,0 +1,130 @@
+using UnityEngine;
+using WagonShopsEnhanced;
+
+namespace WagonShopsEnhanced.Components
+{
+    /// <summary>
+    /// Attached to every TransportWagon at Start time by <see cref="Patches.TransportWagonPatches"/>.
+    /// Tracks the state needed for return-trip backhaul logic.
+    /// </summary>
+    public class WagonEnhancementData : MonoBehaviour
+    {
+        // ── Return-trip state ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Set to true by ItemBundleDroppedOff patch the moment a delivery
+        /// completes.  Cleared by ReturnTripSearchEntry once it processes the
+        /// drop-off location.
+        /// </summary>
+        public bool JustDelivered { get; set; }
+
+        /// <summary>World-space position of the most-recent delivery.</summary>
+        public Vector3 LastDeliveryPosition { get; set; }
+
+        /// <summary>
+        /// The requester that was temporarily assigned to this wagon during a
+        /// return-trip search.  Stored so we can clean up the assignment if the
+        /// wagon ultimately parks without executing any logistics work (e.g. the
+        /// request was filled by someone else first).
+        /// </summary>
+        public LogisticsRequester? TemporaryRequester { get; set; }
+
+        // ── Shop-mode cache ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Cached reference to the owning shop's enhancement component, set
+        /// when the wagon is assigned to a shop.  Avoids repeated GetComponent
+        /// calls on the hot path.
+        /// </summary>
+        public WagonShopEnhancement? ShopEnhancement { get; set; }
+
+        // ── Camp haul state ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Cooldown: next Time.time when camp haul scan is allowed.
+        /// Prevents spamming the search every task cycle when idle.
+        /// </summary>
+        public float NextCampHaulScanTime { get; set; }
+
+        /// <summary>
+        /// The requester assigned during a camp haul search.
+        /// Stored for cleanup if the wagon parks without executing.
+        /// </summary>
+        public LogisticsRequester? CampHaulRequester { get; set; }
+
+        /// <summary>
+        /// Cleans up a camp haul assignment if one is pending.
+        /// </summary>
+        public void ClearCampHaulAssignment(TransportWagon wagon)
+        {
+            if (CampHaulRequester == null) return;
+
+            try
+            {
+                CampHaulRequester.UnassignWorker(
+                    wagon,
+                    LogisticsAssignment.AssignmentCategory.Default);
+            }
+            catch (System.Exception ex)
+            {
+                WagonShopsEnhancedMod.Log.Warning(
+                    $"[WSE] ClearCampHaulAssignment failed for {wagon?.name}: {ex.Message}");
+            }
+
+            CampHaulRequester = null;
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Returns the configured search radius based on the owning shop's mode.
+        /// Falls back to the Standard radius when no shop is known.
+        /// </summary>
+        public float ReturnTripRadius =>
+            ShopEnhancement == null
+                ? WagonShopsEnhancedMod.ReturnTripRadiusStandard.Value
+                : ShopEnhancement.Mode switch
+                {
+                    ShopMode.Camp => WagonShopsEnhancedMod.ReturnTripRadiusCamp.Value,
+                    ShopMode.Hub  => WagonShopsEnhancedMod.ReturnTripRadiusHub.Value,
+                    _             => WagonShopsEnhancedMod.ReturnTripRadiusStandard.Value,
+                };
+
+        /// <summary>
+        /// Returns the max-wagon count for the owning shop's mode.
+        /// </summary>
+        public int MaxWagons =>
+            ShopEnhancement == null
+                ? WagonShopsEnhancedMod.MaxWagonsStandard.Value
+                : ShopEnhancement.Mode switch
+                {
+                    ShopMode.Camp => WagonShopsEnhancedMod.MaxWagonsCamp.Value,
+                    ShopMode.Hub  => WagonShopsEnhancedMod.MaxWagonsHub.Value,
+                    _             => WagonShopsEnhancedMod.MaxWagonsStandard.Value,
+                };
+
+        /// <summary>
+        /// Cleans up a temporary requester assignment if one is pending.
+        /// Safe to call even when TemporaryRequester is null.
+        /// </summary>
+        public void ClearTemporaryAssignment(TransportWagon wagon)
+        {
+            if (TemporaryRequester == null) return;
+
+            try
+            {
+                TemporaryRequester.UnassignWorker(
+                    wagon,
+                    LogisticsAssignment.AssignmentCategory.Default);
+            }
+            catch (System.Exception ex)
+            {
+                WagonShopsEnhancedMod.Log.Warning(
+                    $"[WSE] ClearTemporaryAssignment failed for wagon " +
+                    $"{wagon?.name}: {ex.Message}");
+            }
+
+            TemporaryRequester = null;
+        }
+    }
+}
