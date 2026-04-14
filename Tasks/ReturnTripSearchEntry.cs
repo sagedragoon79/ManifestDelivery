@@ -39,6 +39,25 @@ namespace WagonShopsEnhanced.Tasks
         // fires first in the same search cycle.
         private const int PriorityModifier = 3;
 
+        // Camp backhaul: items the wagon will haul FROM hub TO camp residences.
+        // Processed food (not raw — camp produces raw items) + firewood + beer.
+        // Raw items are intentionally excluded since they typically originate
+        // from camps themselves; camps should get finished goods they can't make.
+        private static readonly HashSet<ItemID> CampBackhaulItems = new HashSet<ItemID>
+        {
+            ItemID.Firewood,
+            // Processed food
+            ItemID.Bread,
+            ItemID.Pastry,
+            ItemID.SmokedMeat,
+            ItemID.SmokedFish,
+            ItemID.Cheese,
+            ItemID.Preserves,
+            ItemID.PreservedVeg,
+            // Morale booster — camp pub is a must
+            ItemID.WheatBeer,
+        };
+
         public ReturnTripSearchEntry(TransportWagon wagon, WagonEnhancementData data)
             : base(
                 wagon,                                   // _receiver
@@ -148,9 +167,10 @@ namespace WagonShopsEnhanced.Tasks
                 float distSqr = (requester.transform.position - searchCenter).sqrMagnitude;
                 if (distSqr > radiusSqr) continue;
 
-                // Check that at least one active request passes the bulk
-                // minimum restriction that the wagon enforces.
-                if (!HasEligibleRequest(requester)) continue;
+                // Check that at least one active request is eligible.
+                // In Camp mode, we prioritize firewood + food backhauls to camp residences
+                // (delivery requests) with a relaxed threshold.
+                if (!HasEligibleRequest(requester, isCampMode)) continue;
 
                 // Pick closest to the wagon for efficient routing
                 float wagonDistSqr = (requester.transform.position - _wagon.transform.position).sqrMagnitude;
@@ -187,11 +207,29 @@ namespace WagonShopsEnhanced.Tasks
 
         /// <summary>
         /// Returns true when at least one of the requester's active requests
-        /// would not be rejected by the wagon's RestrictByBulkMinItemCount flag.
+        /// is eligible for this wagon.
+        ///
+        /// In Camp mode: prioritizes delivery requests for firewood + processed
+        /// food + beer — the camp backhaul items. Relaxed bulk threshold so
+        /// even small camp deficits trigger a backhaul trip.
+        ///
+        /// Outside Camp mode: standard bulk check on any delivery/move-out request.
         /// </summary>
-        private bool HasEligibleRequest(LogisticsRequester requester)
+        private bool HasEligibleRequest(LogisticsRequester requester, bool isCampMode)
         {
-            // Delivery requests (things the wagon brings TO this building).
+            // Camp mode: look for firewood/food delivery requests on camp buildings
+            if (isCampMode)
+            {
+                foreach (var kv in requester.activeDeliveryRequests)
+                {
+                    if (IsCampBackhaulRequest(kv.Value))
+                        return true;  // No bulk threshold — camp buildings take any amount
+                }
+                // Fall through and also check move-out (shouldn't fire normally
+                // since CampHaul handles pickups, but safety for edge cases)
+            }
+
+            // Standard: delivery requests with bulk check
             foreach (var kv in requester.activeDeliveryRequests)
             {
                 if (PassesBulkCheck(kv.Value)) return true;
@@ -201,6 +239,27 @@ namespace WagonShopsEnhanced.Tasks
             foreach (var kv in requester.activeMoveOutRequests)
             {
                 if (PassesBulkCheck(kv.Value)) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns true if this request is for an item in the camp backhaul
+        /// whitelist (firewood, processed food, beer).
+        /// </summary>
+        private bool IsCampBackhaulRequest(ItemRequest request)
+        {
+            if (request is SingleItemRequest singleReq)
+                return CampBackhaulItems.Contains(singleReq.itemID);
+
+            // Multi-item requests (like FoodItemsRequest) — accept if the
+            // requester is likely a camp residence needing food/heating.
+            // We allow these since the request type itself implies food or fuel.
+            if (request is MultiItemRequest)
+            {
+                string tag = request.requestTag.ToString();
+                return tag.Contains("Food") || tag.Contains("HeatingFuel") || tag.Contains("Residence");
             }
 
             return false;
