@@ -244,8 +244,12 @@ namespace WagonShopsEnhanced.Components
 
         /// <summary>
         /// Adjusts the building's maxWorkers and userDefinedMaxWorkers based
-        /// on mode. Hub = 4, Camp/Standard = 2. Extra workers are released
-        /// to the laborer pool when slots are reduced.
+        /// on mode. Hub = 4, Camp/Standard = 2.
+        ///
+        /// maxWorkers is an auto-property on Resource with backing field
+        /// &lt;maxWorkers&gt;k__BackingField — we set it directly via reflection.
+        /// userDefinedMaxWorkers setter caps at maxWorkers, so we must raise
+        /// maxWorkers FIRST before the userDefined value can go up.
         /// </summary>
         private void UpdateWorkerSlots()
         {
@@ -256,13 +260,10 @@ namespace WagonShopsEnhanced.Components
 
             try
             {
-                // Set the hard cap (_maxWorkers) via reflection
-                var maxField = typeof(Building).GetField("_maxWorkers", AllInstance);
-                if (maxField == null)
-                {
-                    // Try base class (DataRecord path)
-                    maxField = building.GetType().GetField("_maxWorkers", AllInstance);
-                }
+                // Find the auto-property backing field for maxWorkers.
+                // It's declared on Resource as: public int maxWorkers { get; protected set; }
+                // Backing field name: "<maxWorkers>k__BackingField"
+                var maxField = FindBackingField(building.GetType(), "maxWorkers");
 
                 if (maxField != null)
                 {
@@ -274,8 +275,14 @@ namespace WagonShopsEnhanced.Components
                             $"[WSE] {gameObject.name} maxWorkers: {current} → {targetMax}");
                     }
                 }
+                else
+                {
+                    WagonShopsEnhancedMod.Log.Warning(
+                        $"[WSE] Could not find maxWorkers backing field on {building.GetType().Name}");
+                }
 
-                // Clamp userDefinedMaxWorkers to the new cap
+                // Clamp userDefinedMaxWorkers to the new cap if reducing slots.
+                // Going from Hub (4) to Camp (2): clamps to 2, releasing extra workers.
                 if (building.userDefinedMaxWorkers > targetMax)
                 {
                     building.userDefinedMaxWorkers = targetMax;
@@ -290,7 +297,48 @@ namespace WagonShopsEnhanced.Components
             }
         }
 
+        /// <summary>
+        /// Walks the class hierarchy to find an auto-property backing field
+        /// with the standard C# compiler naming convention.
+        /// </summary>
+        private static FieldInfo? FindBackingField(System.Type startType, string propertyName)
+        {
+            string backingName = $"<{propertyName}>k__BackingField";
+            System.Type? t = startType;
+            while (t != null)
+            {
+                var field = t.GetField(backingName, AllInstance);
+                if (field != null) return field;
+                t = t.BaseType;
+            }
+            return null;
+        }
+
         // ── Unity lifecycle ───────────────────────────────────────────────────
+
+        private bool _initialized = false;
+
+        private void Start()
+        {
+            // Delay initial setup one frame so the Building component is fully ready
+            StartCoroutine(InitializeDelayed());
+        }
+
+        private System.Collections.IEnumerator InitializeDelayed()
+        {
+            yield return null; // Wait one frame
+            if (_initialized) yield break;
+            _initialized = true;
+
+            // Apply mode-based config on first load (doesn't fire via property setter
+            // since we're not changing the mode, just applying the current one)
+            UpdateWorkerSlots();
+            UpdateWorkAreaCircle();
+
+            WagonShopsEnhancedMod.Log.Msg(
+                $"[WSE] {gameObject.name} initialized as {ModeDisplayName} " +
+                $"(max wagons: {MaxWagons}, radius: {WorkRadius:F0}u)");
+        }
 
         private void Update()
         {
