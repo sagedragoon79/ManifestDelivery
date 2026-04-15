@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
-using WagonShopsEnhanced;
+using ManifestDelivery;
 
-namespace WagonShopsEnhanced.Components
+namespace ManifestDelivery.Components
 {
     // ── Mode enum ─────────────────────────────────────────────────────────────
 
@@ -61,16 +61,16 @@ namespace WagonShopsEnhanced.Components
 
         public int MaxWagons => Mode switch
         {
-            ShopMode.Camp => WagonShopsEnhancedMod.MaxWagonsCamp.Value,
-            ShopMode.Hub  => WagonShopsEnhancedMod.MaxWagonsHub.Value,
-            _             => WagonShopsEnhancedMod.MaxWagonsStandard.Value,
+            ShopMode.Camp => ManifestDeliveryMod.MaxWagonsCamp.Value,
+            ShopMode.Hub  => ManifestDeliveryMod.MaxWagonsHub.Value,
+            _             => ManifestDeliveryMod.MaxWagonsStandard.Value,
         };
 
         public float ReturnTripRadius => Mode switch
         {
-            ShopMode.Camp => WagonShopsEnhancedMod.ReturnTripRadiusCamp.Value,
-            ShopMode.Hub  => WagonShopsEnhancedMod.ReturnTripRadiusHub.Value,
-            _             => WagonShopsEnhancedMod.ReturnTripRadiusStandard.Value,
+            ShopMode.Camp => ManifestDeliveryMod.ReturnTripRadiusCamp.Value,
+            ShopMode.Hub  => ManifestDeliveryMod.ReturnTripRadiusHub.Value,
+            _             => ManifestDeliveryMod.ReturnTripRadiusStandard.Value,
         };
 
         /// <summary>
@@ -85,21 +85,21 @@ namespace WagonShopsEnhanced.Components
         /// </summary>
         public float WorkRadius => Mode switch
         {
-            ShopMode.Camp => WagonShopsEnhancedMod.CampWorkRadius.Value,
-            ShopMode.Hub  => WagonShopsEnhancedMod.HubWorkRadius.Value,
+            ShopMode.Camp => ManifestDeliveryMod.CampWorkRadius.Value,
+            ShopMode.Hub  => ManifestDeliveryMod.HubWorkRadius.Value,
             _             => 0f,
         };
 
         /// <summary>
         /// Camp work radius — kept for backward compat, delegates to WorkRadius.
         /// </summary>
-        public float CampWorkRadius => WagonShopsEnhancedMod.CampWorkRadius.Value;
+        public float CampWorkRadius => ManifestDeliveryMod.CampWorkRadius.Value;
 
         /// <summary>
         /// Returns true when this shop is in Camp mode and camp hauling is enabled.
         /// </summary>
         public bool IsCampHaulActive =>
-            Mode == ShopMode.Camp && WagonShopsEnhancedMod.CampHaulEnabled.Value;
+            Mode == ShopMode.Camp && ManifestDeliveryMod.CampHaulEnabled.Value;
 
         // ── Camp zone helpers ─────────────────────────────────────────────────
 
@@ -171,8 +171,8 @@ namespace WagonShopsEnhanced.Components
 
         private void OnModeChanged()
         {
-            WagonShopsEnhancedMod.Log.Msg(
-                $"[WSE] {gameObject.name} mode → {ModeDisplayName}  " +
+            ManifestDeliveryMod.Log.Msg(
+                $"[MD] {gameObject.name} mode → {ModeDisplayName}  " +
                 $"(max wagons: {MaxWagons}, radius: {WorkRadius:F0}u, " +
                 $"return-trip: {ReturnTripRadius:F0}u)");
 
@@ -232,13 +232,13 @@ namespace WagonShopsEnhanced.Components
                 _workArea.Init(transform.position, radius);
                 _workArea.SetEnabled(true);
 
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] {gameObject.name} work area circle: {radius:F0}u radius");
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] {gameObject.name} work area circle: {radius:F0}u radius");
             }
             catch (System.Exception ex)
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    $"[WSE] UpdateWorkAreaCircle failed: {ex.Message}");
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] UpdateWorkAreaCircle failed: {ex.Message}");
             }
         }
 
@@ -271,14 +271,14 @@ namespace WagonShopsEnhanced.Components
                     if (current != targetMax)
                     {
                         maxField.SetValue(building, targetMax);
-                        WagonShopsEnhancedMod.Log.Msg(
-                            $"[WSE] {gameObject.name} maxWorkers: {current} → {targetMax}");
+                        ManifestDeliveryMod.Log.Msg(
+                            $"[MD] {gameObject.name} maxWorkers: {current} → {targetMax}");
                     }
                 }
                 else
                 {
-                    WagonShopsEnhancedMod.Log.Warning(
-                        $"[WSE] Could not find maxWorkers backing field on {building.GetType().Name}");
+                    ManifestDeliveryMod.Log.Warning(
+                        $"[MD] Could not find maxWorkers backing field on {building.GetType().Name}");
                 }
 
                 // Clamp userDefinedMaxWorkers to the new cap if reducing slots.
@@ -286,14 +286,14 @@ namespace WagonShopsEnhanced.Components
                 if (building.userDefinedMaxWorkers > targetMax)
                 {
                     building.userDefinedMaxWorkers = targetMax;
-                    WagonShopsEnhancedMod.Log.Msg(
-                        $"[WSE] {gameObject.name} userDefinedMaxWorkers clamped to {targetMax}");
+                    ManifestDeliveryMod.Log.Msg(
+                        $"[MD] {gameObject.name} userDefinedMaxWorkers clamped to {targetMax}");
                 }
             }
             catch (System.Exception ex)
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    $"[WSE] UpdateWorkerSlots failed for {gameObject.name}: {ex.Message}");
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] UpdateWorkerSlots failed for {gameObject.name}: {ex.Message}");
             }
         }
 
@@ -335,15 +335,15 @@ namespace WagonShopsEnhanced.Components
             UpdateWorkerSlots();
             UpdateWorkAreaCircle();
 
-            WagonShopsEnhancedMod.Log.Msg(
-                $"[WSE] {gameObject.name} initialized as {ModeDisplayName} " +
+            ManifestDeliveryMod.Log.Msg(
+                $"[MD] {gameObject.name} initialized as {ModeDisplayName} " +
                 $"(max wagons: {MaxWagons}, radius: {WorkRadius:F0}u)");
         }
 
         private void Update()
         {
             // Mode cycling: only respond when the shop's info window is open.
-            if (!UnityEngine.Input.GetKeyDown(WagonShopsEnhancedMod.ModeCycleKey)) return;
+            if (!UnityEngine.Input.GetKeyDown(ManifestDeliveryMod.ModeCycleKey)) return;
 
             // Check whether this shop's window is currently open by looking for
             // a selected component on the same GameObject.
@@ -386,10 +386,10 @@ namespace WagonShopsEnhanced.Components
             };
 
             string label =
-                $"[WSE] {ModeDisplayName}\n" +
+                $"[MD] {ModeDisplayName}\n" +
                 $"Max wagons: {MaxWagons}  " +
                 $"Backhaul radius: {ReturnTripRadius:F0}u{modeBonus}\n" +
-                $"Press [{WagonShopsEnhancedMod.ModeCycleKey}] to cycle mode";
+                $"Press [{ManifestDeliveryMod.ModeCycleKey}] to cycle mode";
 
             GUI.Label(new Rect(screenPos.x - 110, y - 60, 220, 60), label);
             GUI.color = Color.white;

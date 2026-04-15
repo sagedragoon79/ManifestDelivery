@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
-using WagonShopsEnhanced;
-using WagonShopsEnhanced.Components;
+using ManifestDelivery;
+using ManifestDelivery.Components;
 
-namespace WagonShopsEnhanced.Tasks
+namespace ManifestDelivery.Tasks
 {
     /// <summary>
     /// Injected into every TransportWagon's search entry list at priority 2
@@ -113,15 +113,15 @@ namespace WagonShopsEnhanced.Tasks
 
                 _data.CampHaulRequester = bestSource;
 
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] CampHaul: {_wagon.name} assigned to " +
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] CampHaul: {_wagon.name} assigned to " +
                     $"{bestSource.gameObject.name} " +
                     $"({Vector3.Distance(_wagon.transform.position, bestSource.transform.position):F1}u away)");
             }
             catch (System.Exception ex)
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    $"[WSE] CampHaul assignment failed for {_wagon.name}: {ex.Message}");
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] CampHaul assignment failed for {_wagon.name}: {ex.Message}");
             }
 
             // Always return null — LogisticsProxy creates the real task
@@ -195,22 +195,22 @@ namespace WagonShopsEnhanced.Tasks
                     ItemID itemID = singleReq.itemID;
 
                     // Raw meat/fish → smokehouse routing
-                    if (WagonShopsEnhancedMod.CampHaulRawToSmokehouse.Value
+                    if (ManifestDeliveryMod.CampHaulRawToSmokehouse.Value
                         && RawMeatFish.Contains(itemID))
                         return true;
 
                     // Smoked items → hub routing
-                    if (WagonShopsEnhancedMod.CampHaulFoodToHub.Value
+                    if (ManifestDeliveryMod.CampHaulFoodToHub.Value
                         && SmokedItems.Contains(itemID))
                         return true;
 
                     // Iron → hub routing
-                    if (WagonShopsEnhancedMod.CampHaulIronToHub.Value
+                    if (ManifestDeliveryMod.CampHaulIronToHub.Value
                         && IronItems.Contains(itemID))
                         return true;
 
                     // General food → hub routing
-                    if (WagonShopsEnhancedMod.CampHaulFoodToHub.Value
+                    if (ManifestDeliveryMod.CampHaulFoodToHub.Value
                         && IsFoodItem(itemID))
                         return true;
                 }

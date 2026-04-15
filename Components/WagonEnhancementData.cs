@@ -1,7 +1,7 @@
 using UnityEngine;
-using WagonShopsEnhanced;
+using ManifestDelivery;
 
-namespace WagonShopsEnhanced.Components
+namespace ManifestDelivery.Components
 {
     /// <summary>
     /// Attached to every TransportWagon at Start time by <see cref="Patches.TransportWagonPatches"/>.
@@ -67,8 +67,8 @@ namespace WagonShopsEnhanced.Components
             }
             catch (System.Exception ex)
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    $"[WSE] ClearCampHaulAssignment failed for {wagon?.name}: {ex.Message}");
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] ClearCampHaulAssignment failed for {wagon?.name}: {ex.Message}");
             }
 
             CampHaulRequester = null;
@@ -82,12 +82,12 @@ namespace WagonShopsEnhanced.Components
         /// </summary>
         public float ReturnTripRadius =>
             ShopEnhancement == null
-                ? WagonShopsEnhancedMod.ReturnTripRadiusStandard.Value
+                ? ManifestDeliveryMod.ReturnTripRadiusStandard.Value
                 : ShopEnhancement.Mode switch
                 {
-                    ShopMode.Camp => WagonShopsEnhancedMod.ReturnTripRadiusCamp.Value,
-                    ShopMode.Hub  => WagonShopsEnhancedMod.ReturnTripRadiusHub.Value,
-                    _             => WagonShopsEnhancedMod.ReturnTripRadiusStandard.Value,
+                    ShopMode.Camp => ManifestDeliveryMod.ReturnTripRadiusCamp.Value,
+                    ShopMode.Hub  => ManifestDeliveryMod.ReturnTripRadiusHub.Value,
+                    _             => ManifestDeliveryMod.ReturnTripRadiusStandard.Value,
                 };
 
         /// <summary>
@@ -95,12 +95,12 @@ namespace WagonShopsEnhanced.Components
         /// </summary>
         public int MaxWagons =>
             ShopEnhancement == null
-                ? WagonShopsEnhancedMod.MaxWagonsStandard.Value
+                ? ManifestDeliveryMod.MaxWagonsStandard.Value
                 : ShopEnhancement.Mode switch
                 {
-                    ShopMode.Camp => WagonShopsEnhancedMod.MaxWagonsCamp.Value,
-                    ShopMode.Hub  => WagonShopsEnhancedMod.MaxWagonsHub.Value,
-                    _             => WagonShopsEnhancedMod.MaxWagonsStandard.Value,
+                    ShopMode.Camp => ManifestDeliveryMod.MaxWagonsCamp.Value,
+                    ShopMode.Hub  => ManifestDeliveryMod.MaxWagonsHub.Value,
+                    _             => ManifestDeliveryMod.MaxWagonsStandard.Value,
                 };
 
         /// <summary>
@@ -119,8 +119,8 @@ namespace WagonShopsEnhanced.Components
             }
             catch (System.Exception ex)
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    $"[WSE] ClearTemporaryAssignment failed for wagon " +
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] ClearTemporaryAssignment failed for wagon " +
                     $"{wagon?.name}: {ex.Message}");
             }
 

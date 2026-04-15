@@ -3,14 +3,14 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(WagonShopsEnhanced.WagonShopsEnhancedMod), "Wagon Shops Enhanced", "1.0.0", "WSE")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.1", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
-namespace WagonShopsEnhanced
+namespace ManifestDelivery
 {
-    public class WagonShopsEnhancedMod : MelonMod
+    public class ManifestDeliveryMod : MelonMod
     {
-        public static WagonShopsEnhancedMod Instance { get; private set; } = null!;
+        public static ManifestDeliveryMod Instance { get; private set; } = null!;
 
         // ── Return-trip backhaul ──────────────────────────────────────────────
         public static MelonPreferences_Entry<bool>  ReturnTripEnabled        { get; private set; } = null!;
@@ -50,7 +50,7 @@ namespace WagonShopsEnhanced
             Instance = this;
 
             // ── Return-trip settings ─────────────────────────────────────────
-            var cat = MelonPreferences.CreateCategory("WagonShopsEnhanced");
+            var cat = MelonPreferences.CreateCategory("ManifestDelivery");
 
             ReturnTripEnabled = cat.CreateEntry(
                 "ReturnTripEnabled", true,
@@ -150,12 +150,12 @@ namespace WagonShopsEnhanced
             if (System.Enum.TryParse(ModeCycleKeyName.Value, ignoreCase: true, out KeyCode parsed))
                 _modeCycleKey = parsed;
             else
-                LoggerInstance.Warning($"[WSE] Could not parse ModeCycleKey \"{ModeCycleKeyName.Value}\", defaulting to M.");
+                LoggerInstance.Warning($"[MD] Could not parse ModeCycleKey \"{ModeCycleKeyName.Value}\", defaulting to M.");
 
             // ── Apply Harmony patches ────────────────────────────────────────
             HarmonyInstance.PatchAll();
 
-            LoggerInstance.Msg("Wagon Shops Enhanced 1.0.0 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.1 loaded.");
         }
     }
 }

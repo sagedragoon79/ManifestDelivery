@@ -1,9 +1,9 @@
 using HarmonyLib;
 using UnityEngine;
-using WagonShopsEnhanced;
-using WagonShopsEnhanced.Components;
+using ManifestDelivery;
+using ManifestDelivery.Components;
 
-namespace WagonShopsEnhanced.Patches
+namespace ManifestDelivery.Patches
 {
     /// <summary>
     /// All Harmony patches that target WagonShop.
@@ -86,8 +86,8 @@ namespace WagonShopsEnhanced.Patches
 
             if (cappedSpace < numWagonSpaceAvailable)
             {
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] {__instance.name} wagon cap: {enhancement.MaxWagons} " +
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] {__instance.name} wagon cap: {enhancement.MaxWagons} " +
                     $"(mode={enhancement.ModeDisplayName}, workers={workerCount}, " +
                     $"assigned={assignedCount}, space={numWagonSpaceAvailable})");
             }

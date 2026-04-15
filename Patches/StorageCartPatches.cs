@@ -1,8 +1,8 @@
 using HarmonyLib;
 using System.Reflection;
-using WagonShopsEnhanced;
+using ManifestDelivery;
 
-namespace WagonShopsEnhanced.Patches
+namespace ManifestDelivery.Patches
 {
     /// <summary>
     /// Patches for SupplyWagon (Storage Cart) to make it useful beyond year 1.
@@ -24,7 +24,7 @@ namespace WagonShopsEnhanced.Patches
         [HarmonyPatch(typeof(SupplyWagon), "Start")]
         private static void Start_Postfix(SupplyWagon __instance)
         {
-            int targetCapacity = WagonShopsEnhancedMod.StorageCartCapacity.Value;
+            int targetCapacity = ManifestDeliveryMod.StorageCartCapacity.Value;
             if (targetCapacity <= 0) return;
 
             // _storageItemCountCapacity is a SerializeField on StorageBuilding
@@ -37,14 +37,14 @@ namespace WagonShopsEnhanced.Patches
                 if (current != targetCapacity)
                 {
                     capField.SetValue(__instance, targetCapacity);
-                    WagonShopsEnhancedMod.Log.Msg(
-                        $"[WSE] Storage Cart '{__instance.name}' capacity: {current} → {targetCapacity}");
+                    ManifestDeliveryMod.Log.Msg(
+                        $"[MD] Storage Cart '{__instance.name}' capacity: {current} → {targetCapacity}");
                 }
             }
             else
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    "[WSE] Could not find _storageItemCountCapacity on StorageBuilding.");
+                ManifestDeliveryMod.Log.Warning(
+                    "[MD] Could not find _storageItemCountCapacity on StorageBuilding.");
             }
         }
     }

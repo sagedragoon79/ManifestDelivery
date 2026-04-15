@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net46</TargetFramework>
-    <AssemblyName>WagonShopsEnhanced_FF</AssemblyName>
-    <RootNamespace>WagonShopsEnhanced</RootNamespace>
+    <AssemblyName>ManifestDelivery</AssemblyName>
+    <RootNamespace>ManifestDelivery</RootNamespace>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
-using WagonShopsEnhanced;
-using WagonShopsEnhanced.Components;
+using ManifestDelivery;
+using ManifestDelivery.Components;
 
-namespace WagonShopsEnhanced.Tasks
+namespace ManifestDelivery.Tasks
 {
     /// <summary>
     /// Injected into every TransportWagon's search entry list at priority 3
@@ -77,7 +77,7 @@ namespace WagonShopsEnhanced.Tasks
         {
             // ── Early exits ───────────────────────────────────────────────────
 
-            if (!WagonShopsEnhancedMod.ReturnTripEnabled.Value)
+            if (!ManifestDeliveryMod.ReturnTripEnabled.Value)
                 return null;
 
             if (!_data.JustDelivered)
@@ -108,15 +108,15 @@ namespace WagonShopsEnhanced.Tasks
 
                 _data.TemporaryRequester = best;
 
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] ReturnTrip: {_wagon.name} assigned to " +
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] ReturnTrip: {_wagon.name} assigned to " +
                     $"{best.gameObject.name} " +
                     $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u away)");
             }
             catch (System.Exception ex)
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    $"[WSE] ReturnTrip assignment failed for {_wagon.name}: {ex.Message}");
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] ReturnTrip assignment failed for {_wagon.name}: {ex.Message}");
             }
 
             // Always return null — we never create a task ourselves.
@@ -132,7 +132,7 @@ namespace WagonShopsEnhanced.Tasks
             LogisticsAggregator? aggregator = GetAggregator();
             if (aggregator == null)
             {
-                WagonShopsEnhancedMod.Log.Warning("[WSE] ReturnTrip: could not resolve LogisticsAggregator.");
+                ManifestDeliveryMod.Log.Warning("[MD] ReturnTrip: could not resolve LogisticsAggregator.");
                 return null;
             }
 

@@ -1,11 +1,11 @@
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
-using WagonShopsEnhanced;
-using WagonShopsEnhanced.Components;
-using WagonShopsEnhanced.Tasks;
+using ManifestDelivery;
+using ManifestDelivery.Components;
+using ManifestDelivery.Tasks;
 
-namespace WagonShopsEnhanced.Patches
+namespace ManifestDelivery.Patches
 {
     /// <summary>
     /// All Harmony patches that target TransportWagon.
@@ -57,8 +57,8 @@ namespace WagonShopsEnhanced.Patches
             WagonEnhancementData? data = __instance.GetComponent<WagonEnhancementData>();
             if (data == null)
             {
-                WagonShopsEnhancedMod.Log.Warning(
-                    $"[WSE] SetupSearchEntries: WagonEnhancementData missing on " +
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] SetupSearchEntries: WagonEnhancementData missing on " +
                     $"{__instance.name}, adding now.");
                 data = __instance.gameObject.AddComponent<WagonEnhancementData>();
             }
@@ -66,7 +66,7 @@ namespace WagonShopsEnhanced.Patches
             GameManager? gm = UnitySingleton<GameManager>.Instance;
             if (gm == null)
             {
-                WagonShopsEnhancedMod.Log.Warning("[WSE] SetupSearchEntries: GameManager not ready.");
+                ManifestDeliveryMod.Log.Warning("[MD] SetupSearchEntries: GameManager not ready.");
                 return;
             }
 
@@ -167,8 +167,8 @@ namespace WagonShopsEnhanced.Patches
             if (data.TemporaryRequester != null)
             {
                 data.ClearTemporaryAssignment(wagon);
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] ReturnTrip: no logistics work found near drop-off for " +
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] ReturnTrip: no logistics work found near drop-off for " +
                     $"{wagon.name}, parking and releasing temp assignment.");
             }
 
@@ -176,8 +176,8 @@ namespace WagonShopsEnhanced.Patches
             if (data.CampHaulRequester != null)
             {
                 data.ClearCampHaulAssignment(wagon);
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] CampHaul: no logistics work found for " +
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] CampHaul: no logistics work found for " +
                     $"{wagon.name}, parking and releasing camp haul assignment.");
             }
 
@@ -213,8 +213,8 @@ namespace WagonShopsEnhanced.Patches
             // assignment; clear the reference (but keep the assignment itself).
             if (data.TemporaryRequester != null)
             {
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] ReturnTrip: {wagon.name} started logistics task via " +
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] ReturnTrip: {wagon.name} started logistics task via " +
                     $"backhaul to {data.TemporaryRequester.gameObject.name}.");
                 data.TemporaryRequester = null;
             }
@@ -222,8 +222,8 @@ namespace WagonShopsEnhanced.Patches
             // Clear camp haul assignment once task actually starts
             if (data.CampHaulRequester != null)
             {
-                WagonShopsEnhancedMod.Log.Msg(
-                    $"[WSE] CampHaul: {wagon.name} started logistics task via " +
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] CampHaul: {wagon.name} started logistics task via " +
                     $"camp haul to {data.CampHaulRequester.gameObject.name}.");
                 data.CampHaulRequester = null;
             }
