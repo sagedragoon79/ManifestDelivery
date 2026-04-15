@@ -13,17 +13,20 @@ namespace ManifestDelivery.Tasks
     ///   KickOut(10) → ReturnTrip(3) → CampHaul(2) → LogisticsProxy(0) → ParkWagon(-10)
     ///
     /// WHAT IT DOES:
-    ///   When the wagon belongs to a Camp-mode shop and is idle (not just-delivered),
-    ///   this entry proactively scans production buildings within the camp work radius
+    ///   When the wagon belongs to a Camp-mode shop and is idle, this entry
+    ///   proactively scans production buildings within the camp work radius
     ///   for goods with active TakeOut (move-out) requests.
     ///
-    ///   It filters by item type according to config:
-    ///     - Raw meat/fish → finds nearest smokehouse within camp radius
-    ///     - Smoked meat/fish, other food → finds nearest hub root cellar or market
-    ///     - Iron ingots → finds nearest hub storehouse
+    ///   Any production building's move-out request is eligible — the wagon
+    ///   picks up whatever the camp produces and hauls it to wherever the
+    ///   game's logistics system routes it (typically a hub storage building).
     ///
     ///   The nearest eligible requester is temporarily assigned to the wagon,
     ///   then this entry returns null so LogisticsProxy creates the real task.
+    ///
+    /// EXCLUSIONS:
+    ///   Storage buildings are skipped — camp wagons pick up from PRODUCTION
+    ///   buildings, not shuffle between storages.
     ///
     /// COOLDOWN:
     ///   Scans at most once every 10 seconds per wagon to avoid performance
@@ -35,23 +38,10 @@ namespace ManifestDelivery.Tasks
         private readonly WagonEnhancementData _data;
 
         private const int PriorityModifier = 2;
-        private const float ScanCooldown = 10f;
-
-        // Item IDs for routing decisions
-        private static readonly HashSet<ItemID> RawMeatFish = new HashSet<ItemID>
-        {
-            ItemID.Meat, ItemID.Fish
-        };
-
-        private static readonly HashSet<ItemID> SmokedItems = new HashSet<ItemID>
-        {
-            ItemID.SmokedMeat, ItemID.SmokedFish
-        };
-
-        private static readonly HashSet<ItemID> IronItems = new HashSet<ItemID>
-        {
-            ItemID.Iron
-        };
+        // Short cooldown so wagons claim camp-zone move-out requests FAST —
+        // before villagers (fishermen, foragers) self-assign and haul their
+        // own output across the map. Each wagon scans at most once every 1.5s.
+        private const float ScanCooldown = 1.5f;
 
         // Storage building tags — camp wagons should NOT pick up FROM these
         // (they pick up from production buildings and deliver TO storage)
@@ -163,10 +153,7 @@ namespace ManifestDelivery.Tasks
                 if (!string.IsNullOrEmpty(tag) && StorageBuildingTags.Contains(tag))
                     continue;
 
-                // Check if any move-out request matches our item routing config
-                if (!HasEligibleMoveOutItem(requester)) continue;
-
-                // Check bulk transport minimum
+                // Check bulk transport minimum on any move-out request
                 if (!HasBulkEligibleRequest(requester)) continue;
 
                 if (distSqr < bestDistSqr)
@@ -177,45 +164,6 @@ namespace ManifestDelivery.Tasks
             }
 
             return bestRequester;
-        }
-
-        /// <summary>
-        /// Checks whether any of the requester's move-out requests contain
-        /// items we're configured to haul (food, iron, etc.)
-        /// </summary>
-        private bool HasEligibleMoveOutItem(LogisticsRequester requester)
-        {
-            foreach (var kv in requester.activeMoveOutRequests)
-            {
-                ItemRequest request = kv.Value;
-
-                // Get the item ID from the request
-                if (request is SingleItemRequest singleReq)
-                {
-                    ItemID itemID = singleReq.itemID;
-
-                    // Raw meat/fish → smokehouse routing
-                    if (ManifestDeliveryMod.CampHaulRawToSmokehouse.Value
-                        && RawMeatFish.Contains(itemID))
-                        return true;
-
-                    // Smoked items → hub routing
-                    if (ManifestDeliveryMod.CampHaulFoodToHub.Value
-                        && SmokedItems.Contains(itemID))
-                        return true;
-
-                    // Iron → hub routing
-                    if (ManifestDeliveryMod.CampHaulIronToHub.Value
-                        && IronItems.Contains(itemID))
-                        return true;
-
-                    // General food → hub routing
-                    if (ManifestDeliveryMod.CampHaulFoodToHub.Value
-                        && IsFoodItem(itemID))
-                        return true;
-                }
-            }
-            return false;
         }
 
         /// <summary>
@@ -259,50 +207,5 @@ namespace ManifestDelivery.Tasks
             return false;
         }
 
-        /// <summary>
-        /// Returns true if the given ItemID is a food item.
-        /// Uses Villager.foodItemIDs if available, otherwise a hardcoded set.
-        /// </summary>
-        private static bool IsFoodItem(ItemID id)
-        {
-            // Try the game's static food list first
-            try
-            {
-                ItemID[] foodIDs = Villager.foodItemIDs;
-                if (foodIDs != null)
-                {
-                    for (int i = 0; i < foodIDs.Length; i++)
-                        if (foodIDs[i] == id) return true;
-                    return false;
-                }
-            }
-            catch { }
-
-            // Fallback hardcoded set
-            switch (id)
-            {
-                case ItemID.Meat:
-                case ItemID.Fish:
-                case ItemID.SmokedMeat:
-                case ItemID.SmokedFish:
-                case ItemID.Bread:
-                case ItemID.Pastry:
-                case ItemID.Beans:
-                case ItemID.RootVegetable:
-                case ItemID.Greens:
-                case ItemID.Mushroom:
-                case ItemID.PreservedVeg:
-                case ItemID.Berries:
-                case ItemID.Nuts:
-                case ItemID.Fruit:
-                case ItemID.Preserves:
-                case ItemID.Eggs:
-                case ItemID.Milk:
-                case ItemID.Cheese:
-                    return true;
-                default:
-                    return false;
-            }
-        }
     }
 }

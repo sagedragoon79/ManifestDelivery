@@ -66,10 +66,15 @@ namespace ManifestDelivery.Components
             _             => ManifestDeliveryMod.MaxWagonsStandard.Value,
         };
 
+        /// <summary>
+        /// Return-trip backhaul scan radius. Camp and Hub use their shop's
+        /// WorkRadius (same area as the visual circle). Standard uses its
+        /// own config value (scans around the wagon, not the shop).
+        /// </summary>
         public float ReturnTripRadius => Mode switch
         {
-            ShopMode.Camp => ManifestDeliveryMod.ReturnTripRadiusCamp.Value,
-            ShopMode.Hub  => ManifestDeliveryMod.ReturnTripRadiusHub.Value,
+            ShopMode.Camp => WorkRadius,
+            ShopMode.Hub  => WorkRadius,
             _             => ManifestDeliveryMod.ReturnTripRadiusStandard.Value,
         };
 
@@ -205,6 +210,11 @@ namespace ManifestDelivery.Components
         /// <summary>
         /// Creates or updates the visual radius circle around the Wagon Shop.
         /// Shown in Camp and Hub modes, hidden in Standard.
+        ///
+        /// CRITICAL: After Init() we must call SelectionCircle.CreateEdgeObjects()
+        /// via reflection to regenerate edge mesh positions. SelectionCircle only
+        /// bakes edge positions once in its Start() method; subsequent radius
+        /// changes don't update the visual unless we force a rebuild.
         /// </summary>
         private void UpdateWorkAreaCircle()
         {
@@ -230,7 +240,16 @@ namespace ManifestDelivery.Components
 
                 // Initialize with current position and radius
                 _workArea.Init(transform.position, radius);
-                _workArea.SetEnabled(true);
+
+                // Force the underlying SelectionCircle to regenerate edge meshes
+                // with the new radius value. Without this, the visible ring
+                // stays at whatever radius SelectionCircle.Start captured initially.
+                RegenerateSelectionCircleEdges(_workArea);
+
+                // Only enable visibility when the shop is currently selected.
+                // Actual show/hide is handled in Update() based on IsSelected.
+                var sel = GetComponent<SelectableComponent>();
+                _workArea.SetEnabled(sel != null && sel.IsSelected);
 
                 ManifestDeliveryMod.Log.Msg(
                     $"[MD] {gameObject.name} work area circle: {radius:F0}u radius");
@@ -239,6 +258,33 @@ namespace ManifestDelivery.Components
             {
                 ManifestDeliveryMod.Log.Warning(
                     $"[MD] UpdateWorkAreaCircle failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Forces the WorkArea's SelectionCircle to regenerate its edge meshes
+        /// at the current radius. Uses reflection because `selectionCircle` is
+        /// a private field on WorkArea, but CreateEdgeObjects is public.
+        /// </summary>
+        private static void RegenerateSelectionCircleEdges(WorkArea workArea)
+        {
+            try
+            {
+                var scField = typeof(WorkArea).GetField("selectionCircle", AllInstance);
+                if (scField == null) return;
+
+                var selectionCircle = scField.GetValue(workArea);
+                if (selectionCircle == null) return;
+
+                var createEdges = selectionCircle.GetType().GetMethod(
+                    "CreateEdgeObjects",
+                    BindingFlags.Public | BindingFlags.Instance);
+                createEdges?.Invoke(selectionCircle, null);
+            }
+            catch (System.Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] RegenerateSelectionCircleEdges failed: {ex.Message}");
             }
         }
 
@@ -340,18 +386,25 @@ namespace ManifestDelivery.Components
                 $"(max wagons: {MaxWagons}, radius: {WorkRadius:F0}u)");
         }
 
+        private bool _lastSelectedState = false;
+
         private void Update()
         {
+            SelectableComponent? sel = GetComponent<SelectableComponent>();
+            bool selected = sel != null && sel.IsSelected;
+
+            // Toggle work area visibility when selection changes
+            if (selected != _lastSelectedState)
+            {
+                _lastSelectedState = selected;
+                if (_workArea != null && WorkRadius > 0f)
+                    _workArea.SetEnabled(selected);
+            }
+
             // Mode cycling: only respond when the shop's info window is open.
             if (!UnityEngine.Input.GetKeyDown(ManifestDeliveryMod.ModeCycleKey)) return;
-
-            // Check whether this shop's window is currently open by looking for
-            // a selected component on the same GameObject.
-            SelectableComponent? sel = GetComponent<SelectableComponent>();
-            if (sel != null && sel.IsSelected)
-            {
+            if (selected)
                 CycleMode();
-            }
         }
 
         private void OnGUI()
@@ -379,16 +432,23 @@ namespace ManifestDelivery.Components
 
             string modeBonus = Mode switch
             {
-                ShopMode.Camp => $"\nCamp radius: {CampWorkRadius:F0}u  Haul: {(IsCampHaulActive ? "ON" : "OFF")}" +
-                                 $"\nSpeed: +25%",
+                ShopMode.Camp => $"\nHaul: {(IsCampHaulActive ? "ON" : "OFF")}  Speed: +25%",
                 ShopMode.Hub  => $"\nSpeed: -10%  Capacity: +20%",
                 _             => "",
+            };
+
+            // Camp/Hub show their WorkRadius (same as backhaul — one radius per mode)
+            // Standard shows its scan-around-wagon backhaul radius
+            string radiusLabel = Mode switch
+            {
+                ShopMode.Standard => $"Backhaul radius: {ReturnTripRadius:F0}u",
+                _                 => $"Work radius: {WorkRadius:F0}u",
             };
 
             string label =
                 $"[MD] {ModeDisplayName}\n" +
                 $"Max wagons: {MaxWagons}  " +
-                $"Backhaul radius: {ReturnTripRadius:F0}u{modeBonus}\n" +
+                $"{radiusLabel}{modeBonus}\n" +
                 $"Press [{ManifestDeliveryMod.ModeCycleKey}] to cycle mode";
 
             GUI.Label(new Rect(screenPos.x - 110, y - 60, 220, 60), label);

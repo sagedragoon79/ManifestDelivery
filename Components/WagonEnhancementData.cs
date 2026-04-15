@@ -78,6 +78,9 @@ namespace ManifestDelivery.Components
 
         /// <summary>
         /// Returns the configured search radius based on the owning shop's mode.
+        /// Standard mode uses its own config value (around the wagon).
+        /// Camp/Hub modes use their WorkRadius (around the shop) — one radius
+        /// per shop mode, consistent with the visual service area circle.
         /// Falls back to the Standard radius when no shop is known.
         /// </summary>
         public float ReturnTripRadius =>
@@ -85,8 +88,8 @@ namespace ManifestDelivery.Components
                 ? ManifestDeliveryMod.ReturnTripRadiusStandard.Value
                 : ShopEnhancement.Mode switch
                 {
-                    ShopMode.Camp => ManifestDeliveryMod.ReturnTripRadiusCamp.Value,
-                    ShopMode.Hub  => ManifestDeliveryMod.ReturnTripRadiusHub.Value,
+                    ShopMode.Camp => ShopEnhancement.WorkRadius,
+                    ShopMode.Hub  => ShopEnhancement.WorkRadius,
                     _             => ManifestDeliveryMod.ReturnTripRadiusStandard.Value,
                 };
 

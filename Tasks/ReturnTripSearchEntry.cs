@@ -136,20 +136,33 @@ namespace ManifestDelivery.Tasks
                 return null;
             }
 
-            float radius     = _data.ReturnTripRadius;
-            float radiusSqr  = radius * radius;
-
-            // Camp mode: anchor search to the shop's position, not the wagon's.
-            // This means after delivering to the hub, the wagon only finds backhaul
-            // work near its home camp — not random hub-area work.
+            // Camp AND Hub modes: anchor search to the shop's position using
+            // the shop's WorkRadius. This keeps both mode types focused on their
+            // service area — Camp wagons only backhaul to camp buildings,
+            // Hub wagons only serve the town. Matches the visual circle.
+            //
+            // Standard mode: scan around the wagon's current position using
+            // ReturnTripRadiusStandard (no shop zone concept).
             Vector3 searchCenter;
+            float radius;
             bool isCampMode = _data.ShopEnhancement != null
                               && _data.ShopEnhancement.Mode == Components.ShopMode.Camp;
+            bool isShopAnchored = _data.ShopEnhancement != null
+                                  && (_data.ShopEnhancement.Mode == Components.ShopMode.Camp
+                                      || _data.ShopEnhancement.Mode == Components.ShopMode.Hub);
 
-            if (isCampMode && _data.ShopEnhancement != null)
+            if (isShopAnchored && _data.ShopEnhancement != null)
+            {
                 searchCenter = _data.ShopEnhancement.transform.position;
+                radius = _data.ShopEnhancement.WorkRadius;  // Camp=60u, Hub=100u
+            }
             else
+            {
                 searchCenter = _wagon.transform.position;
+                radius = _data.ReturnTripRadius;            // Standard: around wagon
+            }
+
+            float radiusSqr = radius * radius;
 
             LogisticsRequester? bestRequester = null;
             float bestDistSqr = float.MaxValue;

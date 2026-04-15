@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.1", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.2", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -15,8 +15,8 @@ namespace ManifestDelivery
         // ── Return-trip backhaul ──────────────────────────────────────────────
         public static MelonPreferences_Entry<bool>  ReturnTripEnabled        { get; private set; } = null!;
         public static MelonPreferences_Entry<float> ReturnTripRadiusStandard { get; private set; } = null!;
-        public static MelonPreferences_Entry<float> ReturnTripRadiusCamp     { get; private set; } = null!;
-        public static MelonPreferences_Entry<float> ReturnTripRadiusHub      { get; private set; } = null!;
+        // Camp and Hub modes use their WorkRadius (CampWorkRadius / HubWorkRadius)
+        // for ReturnTrip scans — keeping one radius per mode (the shop's service area).
 
         // ── Wagon caps ────────────────────────────────────────────────────────
         public static MelonPreferences_Entry<int> MaxWagonsStandard { get; private set; } = null!;
@@ -24,12 +24,9 @@ namespace ManifestDelivery
         public static MelonPreferences_Entry<int> MaxWagonsHub      { get; private set; } = null!;
 
         // ── Camp stockyard ────────────────────────────────────────────────────
-        public static MelonPreferences_Entry<bool>  CampHaulEnabled         { get; private set; } = null!;
-        public static MelonPreferences_Entry<float> CampWorkRadius          { get; private set; } = null!;
-        public static MelonPreferences_Entry<float> HubWorkRadius           { get; private set; } = null!;
-        public static MelonPreferences_Entry<bool>  CampHaulFoodToHub       { get; private set; } = null!;
-        public static MelonPreferences_Entry<bool>  CampHaulRawToSmokehouse { get; private set; } = null!;
-        public static MelonPreferences_Entry<bool>  CampHaulIronToHub       { get; private set; } = null!;
+        public static MelonPreferences_Entry<bool>  CampHaulEnabled { get; private set; } = null!;
+        public static MelonPreferences_Entry<float> CampWorkRadius  { get; private set; } = null!;
+        public static MelonPreferences_Entry<float> HubWorkRadius   { get; private set; } = null!;
 
         // ── Storage Cart ──────────────────────────────────────────────────────
         public static MelonPreferences_Entry<int>   StorageCartCapacity  { get; private set; } = null!;
@@ -62,17 +59,6 @@ namespace ManifestDelivery
                 "ReturnTripRadiusStandard", 120f,
                 display_name: "Return Trip Radius – Standard",
                 description:  "World-unit search radius for Standard mode shops.");
-
-            ReturnTripRadiusCamp = cat.CreateEntry(
-                "ReturnTripRadiusCamp", 200f,
-                display_name: "Return Trip Radius – Camp",
-                description:  "World-unit search radius for Camp mode shops. Larger because " +
-                              "remote camps deliver to a distant hub.");
-
-            ReturnTripRadiusHub = cat.CreateEntry(
-                "ReturnTripRadiusHub", 150f,
-                display_name: "Return Trip Radius – Hub",
-                description:  "World-unit search radius for Hub mode shops.");
 
             // ── Wagon cap settings ───────────────────────────────────────────
             MaxWagonsStandard = cat.CreateEntry(
@@ -111,21 +97,6 @@ namespace ManifestDelivery
                 description:  "World-unit radius around a Hub-mode Wagon Shop. Roughly " +
                               "200% of a Market radius — covers a town center area.");
 
-            CampHaulFoodToHub = cat.CreateEntry(
-                "CampHaulFoodToHub", true,
-                display_name: "Camp Haul Food → Hub",
-                description:  "Haul smoked/processed food from camp to hub root cellars and markets.");
-
-            CampHaulRawToSmokehouse = cat.CreateEntry(
-                "CampHaulRawToSmokehouse", true,
-                display_name: "Camp Haul Raw → Smokehouse",
-                description:  "Route raw meat and fish to smokehouses within the camp radius.");
-
-            CampHaulIronToHub = cat.CreateEntry(
-                "CampHaulIronToHub", true,
-                display_name: "Camp Haul Iron → Hub",
-                description:  "Haul iron ingots from camp smelters to hub storehouses.");
-
             // ── Storage Cart settings ───────────────────────────────────────
             StorageCartCapacity = cat.CreateEntry(
                 "StorageCartCapacity", 1500,
@@ -155,7 +126,7 @@ namespace ManifestDelivery
             // ── Apply Harmony patches ────────────────────────────────────────
             HarmonyInstance.PatchAll();
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.1 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.2 loaded.");
         }
     }
 }
