@@ -92,10 +92,10 @@ namespace ManifestDelivery
                               "150% of a Fishing Shack radius — enough for a compact camp.");
 
             HubWorkRadius = cat.CreateEntry(
-                "HubWorkRadius", 100f,
+                "HubWorkRadius", 200f,
                 display_name: "Hub Work Radius",
-                description:  "World-unit radius around a Hub-mode Wagon Shop. Roughly " +
-                              "200% of a Market radius — covers a town center area.");
+                description:  "World-unit radius around a Hub-mode Wagon Shop. " +
+                              "Covers a full town center area including outlying crafters.");
 
             // ── Storage Cart settings ───────────────────────────────────────
             StorageCartCapacity = cat.CreateEntry(
