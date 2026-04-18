@@ -4,6 +4,13 @@
     <TargetFramework>net46</TargetFramework>
     <AssemblyName>ManifestDelivery</AssemblyName>
     <RootNamespace>ManifestDelivery</RootNamespace>
+    <Version>1.0.2.0</Version>
+    <FileVersion>1.0.2.0</FileVersion>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <Description>Wagon Shop overhaul mod for Farthest Frontier</Description>
+    <Company>SageDragoon</Company>
+    <Product>Manifest Delivery</Product>
+    <Copyright>Copyright © SageDragoon 2026</Copyright>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
