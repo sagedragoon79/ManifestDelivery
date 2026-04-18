@@ -12,6 +12,9 @@ namespace ManifestDelivery
     {
         public static ManifestDeliveryMod Instance { get; private set; } = null!;
 
+        // ── Master switch ─────────────────────────────────────────────────────
+        public static MelonPreferences_Entry<bool>  ModEnabled               { get; private set; } = null!;
+
         // ── Return-trip backhaul ──────────────────────────────────────────────
         public static MelonPreferences_Entry<bool>  ReturnTripEnabled        { get; private set; } = null!;
         public static MelonPreferences_Entry<float> ReturnTripRadiusStandard { get; private set; } = null!;
@@ -46,9 +49,20 @@ namespace ManifestDelivery
         {
             Instance = this;
 
-            // ── Return-trip settings ─────────────────────────────────────────
             var cat = MelonPreferences.CreateCategory("ManifestDelivery");
 
+            ModEnabled = cat.CreateEntry(
+                "ModEnabled", true,
+                display_name: "Mod Enabled",
+                description:  "Master switch to enable/disable Manifest Delivery. Requires game restart.");
+
+            if (!ModEnabled.Value)
+            {
+                LoggerInstance.Msg("Manifest Delivery is DISABLED via config.");
+                return;
+            }
+
+            // ── Return-trip settings ─────────────────────────────────────────
             ReturnTripEnabled = cat.CreateEntry(
                 "ReturnTripEnabled", true,
                 display_name: "Return Trip Enabled",

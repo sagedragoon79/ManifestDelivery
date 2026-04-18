@@ -41,6 +41,24 @@ namespace ManifestDelivery.Components
     /// </summary>
     public class WagonShopEnhancement : MonoBehaviour
     {
+        // ── Persistent mode storage ──────────────────────────────────────────
+        // Modes are saved per-shop using position-based keys (same pattern as
+        // Tended Wilds priority persistence). Survives save/load because the
+        // dictionary is static and keyed by building position, not instance ID.
+
+        private static readonly Dictionary<int, ShopMode> SavedModes =
+            new Dictionary<int, ShopMode>();
+
+        /// <summary>
+        /// Position-based hash key for this shop. Survives building upgrades
+        /// and save/load cycles since position doesn't change.
+        /// </summary>
+        private int GetShopKey()
+        {
+            var pos = transform.position;
+            return Mathf.RoundToInt(pos.x * 1000f + pos.z);
+        }
+
         // ── State ─────────────────────────────────────────────────────────────
 
         [SerializeField]
@@ -53,7 +71,24 @@ namespace ManifestDelivery.Components
             {
                 if (_mode == value) return;
                 _mode = value;
+                SavedModes[GetShopKey()] = value;
                 OnModeChanged();
+            }
+        }
+
+        /// <summary>
+        /// Restores mode from the static dictionary if a previous session
+        /// saved a mode for this position.
+        /// </summary>
+        private void RestoreSavedMode()
+        {
+            int key = GetShopKey();
+            if (SavedModes.TryGetValue(key, out ShopMode savedMode) && savedMode != _mode)
+            {
+                _mode = savedMode;  // Set directly, then trigger OnModeChanged
+                OnModeChanged();
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] {gameObject.name} restored mode '{ModeDisplayName}' from save (key={key})");
             }
         }
 
@@ -376,8 +411,12 @@ namespace ManifestDelivery.Components
             if (_initialized) yield break;
             _initialized = true;
 
-            // Apply mode-based config on first load (doesn't fire via property setter
-            // since we're not changing the mode, just applying the current one)
+            // Restore mode from position-based save dictionary.
+            // Must happen before UpdateWorkerSlots/UpdateWorkAreaCircle
+            // since those depend on the current mode.
+            RestoreSavedMode();
+
+            // Apply mode-based config
             UpdateWorkerSlots();
             UpdateWorkAreaCircle();
 
