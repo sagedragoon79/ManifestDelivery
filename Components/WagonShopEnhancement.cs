@@ -486,15 +486,20 @@ namespace ManifestDelivery.Components
 
         private void Update()
         {
+            // Sync placement preview circle positions with cursor
+            Patches.WagonShopPatches.UpdatePreviewCircles();
+
             SelectableComponent? sel = GetComponent<SelectableComponent>();
             bool selected = sel != null && sel.IsSelected;
 
-            // Toggle work area visibility when selection changes
-            if (selected != _lastSelectedState)
+            // Show circle when: this shop is selected OR a WagonShop is being placed
+            bool shouldShow = selected || Patches.WagonShopPatches.IsPlacingWagonShop;
+
+            if (shouldShow != _lastSelectedState)
             {
-                _lastSelectedState = selected;
+                _lastSelectedState = shouldShow;
                 if (_workArea != null && WorkRadius > 0f)
-                    _workArea.SetEnabled(selected);
+                    _workArea.SetEnabled(shouldShow);
             }
 
             // Mode cycling: only respond when the shop's info window is open.
