@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using UnityEngine;
 using ManifestDelivery;
@@ -49,6 +50,9 @@ namespace ManifestDelivery.Components
         private static readonly Dictionary<int, ShopMode> SavedModes =
             new Dictionary<int, ShopMode>();
 
+        private static readonly string SaveFilePath =
+            Path.Combine(Application.dataPath, "..", "UserData", "ManifestDelivery_ShopModes.txt");
+
         /// <summary>
         /// Position-based hash key for this shop. Survives building upgrades
         /// and save/load cycles since position doesn't change.
@@ -57,6 +61,58 @@ namespace ManifestDelivery.Components
         {
             var pos = transform.position;
             return Mathf.RoundToInt(pos.x * 1000f + pos.z);
+        }
+
+        /// <summary>
+        /// Save all shop modes to disk. Called on mode change.
+        /// Format: one line per shop, "key:mode" (e.g., "1234567:Camp").
+        /// </summary>
+        public static void SaveModesToDisk()
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(SaveFilePath);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+                var lines = new List<string>();
+                foreach (var kvp in SavedModes)
+                    lines.Add($"{kvp.Key}:{kvp.Value}");
+
+                File.WriteAllLines(SaveFilePath, lines.ToArray());
+            }
+            catch (System.Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning($"[MD] SaveModesToDisk failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Load shop modes from disk. Called once during mod initialization
+        /// (scene load). Populates the static SavedModes dictionary so
+        /// RestoreSavedMode() can find each shop's mode by position key.
+        /// </summary>
+        public static void LoadModesFromDisk()
+        {
+            try
+            {
+                if (!File.Exists(SaveFilePath)) return;
+
+                SavedModes.Clear();
+                foreach (var line in File.ReadAllLines(SaveFilePath))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length != 2) continue;
+                    if (!int.TryParse(parts[0], out int key)) continue;
+                    if (!System.Enum.TryParse(parts[1], out ShopMode mode)) continue;
+                    SavedModes[key] = mode;
+                }
+
+                ManifestDeliveryMod.Log.Msg($"[MD] Loaded {SavedModes.Count} shop mode(s) from disk.");
+            }
+            catch (System.Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning($"[MD] LoadModesFromDisk failed: {ex.Message}");
+            }
         }
 
         // ── State ─────────────────────────────────────────────────────────────
@@ -72,6 +128,7 @@ namespace ManifestDelivery.Components
                 if (_mode == value) return;
                 _mode = value;
                 SavedModes[GetShopKey()] = value;
+                SaveModesToDisk();
                 OnModeChanged();
             }
         }
