@@ -87,6 +87,10 @@ namespace ManifestDelivery.Tasks
             if (_wagon.driver.IsNull())
                 return null;
 
+            // Lazy-resolve shop link so Camp/Hub search-center anchoring works
+            // even when AssignedToWagonShop fired before our data component.
+            _data.ResolveShopEnhancement(_wagon);
+
             // ── Clear the flag immediately so we only run once per delivery ──
             _data.JustDelivered = false;
 
@@ -108,10 +112,12 @@ namespace ManifestDelivery.Tasks
 
                 _data.TemporaryRequester = best;
 
+                string items = DescribeMoveOut(best);
                 ManifestDeliveryMod.Log.Msg(
-                    $"[MD] ReturnTrip: {_wagon.name} assigned to " +
+                    $"[MD] ReturnTrip CLAIM: {_wagon.name} → " +
                     $"{best.gameObject.name} " +
-                    $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u away)");
+                    $"[{items}] " +
+                    $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u)");
             }
             catch (System.Exception ex)
             {
@@ -126,6 +132,28 @@ namespace ManifestDelivery.Tasks
 #nullable restore warnings
 
         // ── Private helpers ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Formats both delivery and move-out items as "Firewood×40 [in], Fish×25 [out]"
+        /// for logs. In Camp mode, ReturnTrip typically claims delivery requests
+        /// (firewood/food to camp buildings), so both directions matter.
+        /// </summary>
+        private static string DescribeMoveOut(LogisticsRequester requester)
+        {
+            var parts = new List<string>();
+            foreach (var kv in requester.activeDeliveryRequests)
+            {
+                string item = kv.Key.customStringTiedToID ?? "?";
+                parts.Add($"{item} [in]");
+            }
+            foreach (var kv in requester.activeMoveOutRequests)
+            {
+                string item = kv.Key.customStringTiedToID ?? "?";
+                uint qty   = kv.Value.GetTotalUnreservedCount();
+                parts.Add($"{item}×{qty} [out]");
+            }
+            return parts.Count > 0 ? string.Join(", ", parts.ToArray()) : "nothing";
+        }
 
         private LogisticsRequester? FindBestNearbyRequester()
         {

@@ -155,7 +155,7 @@ namespace ManifestDelivery.Patches
             rowRT.anchorMax = new Vector2(0.5f, 1f);
             rowRT.pivot = new Vector2(0.5f, 1f);
             rowRT.anchoredPosition = new Vector2(0f, -50f);
-            rowRT.sizeDelta = new Vector2(300f, 30f);
+            rowRT.sizeDelta = new Vector2(330f, 30f);
 
             var hlg = row.AddComponent<HorizontalLayoutGroup>();
             hlg.spacing = 6f;
@@ -198,7 +198,7 @@ namespace ManifestDelivery.Patches
             var le = btnObj.AddComponent<LayoutElement>();
             le.preferredHeight = 28f;
             le.flexibleWidth = 1f;
-            le.minWidth = 64f;
+            le.minWidth = 90f;
 
             // Inner background = mode-indicator color, inset 2px from border
             var innerObj = new GameObject("Inner");

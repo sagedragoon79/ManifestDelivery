@@ -63,6 +63,21 @@ namespace ManifestDelivery.Patches
                 data = __instance.gameObject.AddComponent<WagonEnhancementData>();
             }
 
+            // Back-link to the shop's enhancement if we haven't already.
+            // AssignedToWagonShop_Postfix normally handles this, but if it
+            // fired before our data component existed (new wagon mid-save-load
+            // or mid-session spawn), we catch it here.
+            if (data.ShopEnhancement == null && __instance.wagonShop != null)
+            {
+                data.ShopEnhancement =
+                    __instance.wagonShop.GetComponent<WagonShopEnhancement>();
+                if (data.ShopEnhancement != null)
+                    ManifestDeliveryMod.Log.Msg(
+                        $"[MD] Back-linked {__instance.name} → " +
+                        $"{__instance.wagonShop.gameObject.name} " +
+                        $"({data.ShopEnhancement.Mode})");
+            }
+
             GameManager? gm = UnitySingleton<GameManager>.Instance;
             if (gm == null)
             {

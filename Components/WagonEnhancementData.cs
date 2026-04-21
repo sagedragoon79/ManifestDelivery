@@ -38,6 +38,26 @@ namespace ManifestDelivery.Components
         /// </summary>
         public WagonShopEnhancement? ShopEnhancement { get; set; }
 
+        /// <summary>
+        /// Lazily resolves the ShopEnhancement reference from the wagon's
+        /// current <c>wagonShop</c> property. Call from hot paths (search
+        /// entries, drop-off logging) to back-fill the link when wagons
+        /// were created before our mod attached, or when AssignedToWagonShop
+        /// fired before our data component existed.
+        /// </summary>
+        public WagonShopEnhancement? ResolveShopEnhancement(TransportWagon wagon)
+        {
+            if (ShopEnhancement != null) return ShopEnhancement;
+            if (wagon == null || wagon.wagonShop == null) return null;
+
+            ShopEnhancement = wagon.wagonShop.GetComponent<WagonShopEnhancement>();
+            if (ShopEnhancement != null)
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] Back-linked {wagon.name} → " +
+                    $"{wagon.wagonShop.gameObject.name} ({ShopEnhancement.Mode})");
+            return ShopEnhancement;
+        }
+
         // ── Camp haul state ───────────────────────────────────────────────────
 
         /// <summary>

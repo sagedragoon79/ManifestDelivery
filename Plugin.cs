@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.5", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.6", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -100,10 +100,11 @@ namespace ManifestDelivery
                               "nearby production buildings to hub storage.");
 
             CampWorkRadius = cat.CreateEntry(
-                "CampWorkRadius", 60f,
+                "CampWorkRadius", 120f,
                 display_name: "Camp Work Radius",
-                description:  "World-unit radius around a Camp-mode Wagon Shop. Roughly " +
-                              "150% of a Fishing Shack radius — enough for a compact camp.");
+                description:  "World-unit radius around a Camp-mode Wagon Shop. Default " +
+                              "120u covers a typical remote camp (hunter + smokehouse + " +
+                              "forager + small mine) comfortably.");
 
             HubWorkRadius = cat.CreateEntry(
                 "HubWorkRadius", 200f,
@@ -148,7 +149,7 @@ namespace ManifestDelivery
             // ── Load saved shop modes from disk ─────────────────────────────
             Components.WagonShopEnhancement.LoadModesFromDisk();
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.5 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.6 loaded.");
         }
     }
 }

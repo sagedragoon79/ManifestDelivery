@@ -70,8 +70,11 @@ namespace ManifestDelivery.Tasks
         {
             // ── Early exits ───────────────────────────────────────────────────
 
-            // Only active in Camp mode with hauling enabled
-            if (_data.ShopEnhancement == null || !_data.ShopEnhancement.IsCampHaulActive)
+            // Only active in Camp mode with hauling enabled.
+            // Lazy-resolve the shop link in case AssignedToWagonShop fired
+            // before our data component existed.
+            var shop = _data.ResolveShopEnhancement(_wagon);
+            if (shop == null || !shop.IsCampHaulActive)
                 return null;
 
             // Don't scan if the return-trip just fired (let it handle post-delivery)
@@ -103,10 +106,12 @@ namespace ManifestDelivery.Tasks
 
                 _data.CampHaulRequester = bestSource;
 
+                string items = DescribeMoveOut(bestSource);
                 ManifestDeliveryMod.Log.Msg(
-                    $"[MD] CampHaul: {_wagon.name} assigned to " +
+                    $"[MD] CampHaul CLAIM: {_wagon.name} → " +
                     $"{bestSource.gameObject.name} " +
-                    $"({Vector3.Distance(_wagon.transform.position, bestSource.transform.position):F1}u away)");
+                    $"[{items}] " +
+                    $"({Vector3.Distance(_wagon.transform.position, bestSource.transform.position):F1}u)");
             }
             catch (System.Exception ex)
             {
@@ -177,6 +182,21 @@ namespace ManifestDelivery.Tasks
                 if (PassesBulkCheck(kv.Value)) return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// Formats the requester's outgoing items as "Fish×25, Meat×10" for logs.
+        /// </summary>
+        private static string DescribeMoveOut(LogisticsRequester requester)
+        {
+            var parts = new List<string>();
+            foreach (var kv in requester.activeMoveOutRequests)
+            {
+                string item = kv.Key.customStringTiedToID ?? "?";
+                uint qty   = kv.Value.GetTotalUnreservedCount();
+                parts.Add($"{item}×{qty}");
+            }
+            return parts.Count > 0 ? string.Join(", ", parts.ToArray()) : "nothing";
         }
 
         /// <summary>
