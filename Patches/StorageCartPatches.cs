@@ -47,5 +47,30 @@ namespace ManifestDelivery.Patches
                     "[MD] Could not find _storageItemCountCapacity on StorageBuilding.");
             }
         }
+
+        // ── 2. Multiply Storage Cart relocation movement speed ────────────────
+        //
+        //  Building.movementSpeed is the relocation speed (cart being moved to
+        //  a new location). Vanilla's value is painfully slow. Multiply the
+        //  property result for SupplyWagons only, so road-bonus math is
+        //  preserved but the effective pace is faster.
+        //
+        //  Applied via get_movementSpeed Postfix rather than field mutation so
+        //  we don't stomp on roadBonus recalculation.
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(Building), "get_movementSpeed")]
+        private static void movementSpeed_Postfix(
+            Building     __instance,
+            ref float    __result)
+        {
+            // Only affect Storage Carts (SupplyWagon), not other mobile buildings
+            if (!(__instance is SupplyWagon)) return;
+
+            float mult = ManifestDeliveryMod.StorageCartSpeedMult.Value;
+            if (mult <= 0f || mult == 1f) return;
+
+            __result *= mult;
+        }
     }
 }

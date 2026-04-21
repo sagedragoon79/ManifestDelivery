@@ -64,6 +64,31 @@ namespace ManifestDelivery.Components
         }
 
         /// <summary>
+        /// Public lookup used by early-boot patches (before our enhancement
+        /// component exists on the shop). Returns the saved mode for the
+        /// given world position, or null if this shop hasn't been saved.
+        /// </summary>
+        public static ShopMode? GetSavedModeForPosition(Vector3 pos)
+        {
+            int key = Mathf.RoundToInt(pos.x * 1000f + pos.z);
+            if (SavedModes.TryGetValue(key, out ShopMode m))
+                return m;
+            return null;
+        }
+
+        /// <summary>
+        /// Max wagons for a given mode — used by patches that can't resolve
+        /// a live WagonShopEnhancement yet.
+        /// </summary>
+        public static int GetMaxWagonsForMode(ShopMode mode) =>
+            mode switch
+            {
+                ShopMode.Camp => ManifestDeliveryMod.MaxWagonsCamp.Value,
+                ShopMode.Hub  => ManifestDeliveryMod.MaxWagonsHub.Value,
+                _             => ManifestDeliveryMod.MaxWagonsStandard.Value,
+            };
+
+        /// <summary>
         /// Save all shop modes to disk. Called on mode change.
         /// Format: one line per shop, "key:mode" (e.g., "1234567:Camp").
         /// </summary>
@@ -108,6 +133,8 @@ namespace ManifestDelivery.Components
                 }
 
                 ManifestDeliveryMod.Log.Msg($"[MD] Loaded {SavedModes.Count} shop mode(s) from disk.");
+                foreach (var kvp in SavedModes)
+                    ManifestDeliveryMod.Log.Msg($"[MD]   saved key={kvp.Key} mode={kvp.Value}");
             }
             catch (System.Exception ex)
             {
@@ -419,13 +446,33 @@ namespace ManifestDelivery.Components
                         $"[MD] Could not find maxWorkers backing field on {building.GetType().Name}");
                 }
 
-                // Clamp userDefinedMaxWorkers to the new cap if reducing slots.
-                // Going from Hub (4) to Camp (2): clamps to 2, releasing extra workers.
-                if (building.userDefinedMaxWorkers > targetMax)
+                // Sync userDefinedMaxWorkers to the new cap.
+                //   Going Hub (4) → Camp (2): clamps down to 2.
+                //   Going Camp/Std (2) → Hub (4): raises to 4.
+                if (building.userDefinedMaxWorkers != targetMax)
                 {
+                    int before = building.userDefinedMaxWorkers;
                     building.userDefinedMaxWorkers = targetMax;
                     ManifestDeliveryMod.Log.Msg(
-                        $"[MD] {gameObject.name} userDefinedMaxWorkers clamped to {targetMax}");
+                        $"[MD] {gameObject.name} userDefinedMaxWorkers: {before} → {targetMax}");
+                }
+
+                // CRITICAL: setting the property directly bypasses the
+                // hire-worker path that + button triggers. AttemptToAddMaxWorkers
+                // computes (userDefined - currentCount) and calls AddWorkers()
+                // for the diff — pulls idle wainwrights into empty slots.
+                // Without this, cap shows 4 but only saved-restored workers
+                // stay assigned; empty slots never fill until user clicks +.
+                if (building.userDefinedMaxWorkers > 0)
+                {
+                    int currentWorkers = building.workersRO?.Count ?? 0;
+                    if (currentWorkers < building.userDefinedMaxWorkers)
+                    {
+                        building.AttemptToAddMaxWorkers();
+                        ManifestDeliveryMod.Log.Msg(
+                            $"[MD] {gameObject.name} AttemptToAddMaxWorkers " +
+                            $"(workers: {currentWorkers} → target {building.userDefinedMaxWorkers})");
+                    }
                 }
             }
             catch (System.Exception ex)
