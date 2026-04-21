@@ -502,58 +502,16 @@ namespace ManifestDelivery.Components
                     _workArea.SetEnabled(shouldShow);
             }
 
+            // Mode buttons are injected via Harmony postfix on
+            // UIBuildingInfoWindow.SetTargetData — no polling needed.
+
             // Mode cycling: only respond when the shop's info window is open.
             if (!UnityEngine.Input.GetKeyDown(ManifestDeliveryMod.ModeCycleKey)) return;
             if (selected)
                 CycleMode();
         }
 
-        private void OnGUI()
-        {
-            // Only draw when selected.
-            SelectableComponent? sel = GetComponent<SelectableComponent>();
-            if (sel == null || !sel.IsSelected) return;
-
-            // Simple world-to-screen label above the building.
-            Vector3 screenPos = Camera.main != null
-                ? Camera.main.WorldToScreenPoint(transform.position + Vector3.up * 6f)
-                : Vector3.zero;
-
-            if (screenPos.z <= 0) return;
-
-            // Flip Y (GUI uses top-left origin).
-            float y = Screen.height - screenPos.y;
-
-            GUI.color = Mode switch
-            {
-                ShopMode.Camp => new Color(0.8f, 1f, 0.6f),
-                ShopMode.Hub  => new Color(0.6f, 0.8f, 1f),
-                _             => Color.white,
-            };
-
-            string modeBonus = Mode switch
-            {
-                ShopMode.Camp => $"\nHaul: {(IsCampHaulActive ? "ON" : "OFF")}  Speed: +25%",
-                ShopMode.Hub  => $"\nSpeed: -10%  Capacity: +20%",
-                _             => "",
-            };
-
-            // Camp/Hub show their WorkRadius (same as backhaul — one radius per mode)
-            // Standard shows its scan-around-wagon backhaul radius
-            string radiusLabel = Mode switch
-            {
-                ShopMode.Standard => $"Backhaul radius: {ReturnTripRadius:F0}u",
-                _                 => $"Work radius: {WorkRadius:F0}u",
-            };
-
-            string label =
-                $"[MD] {ModeDisplayName}\n" +
-                $"Max wagons: {MaxWagons}  " +
-                $"{radiusLabel}{modeBonus}\n" +
-                $"Press [{ManifestDeliveryMod.ModeCycleKey}] to cycle mode";
-
-            GUI.Label(new Rect(screenPos.x - 110, y - 60, 220, 60), label);
-            GUI.color = Color.white;
-        }
+        // OnGUI floating label removed — mode state is now shown via the
+        // in-window UI buttons (ModeButtonPatches).
     }
 }

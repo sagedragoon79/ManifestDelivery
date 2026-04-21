@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.3", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.5", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -138,13 +138,17 @@ namespace ManifestDelivery
                 LoggerInstance.Warning($"[MD] Could not parse ModeCycleKey \"{ModeCycleKeyName.Value}\", defaulting to M.");
 
             // ── Apply Harmony patches ────────────────────────────────────────
-            // ── Apply Harmony patches ────────────────────────────────────────
             HarmonyInstance.PatchAll();
+
+            // Manual Harmony patch for mode buttons — matches TW's working
+            // pattern (attribute-based patch on UIBuildingInfoWindow had
+            // silent-failure issues).
+            Patches.ModeButtonPatches.Register(HarmonyInstance);
 
             // ── Load saved shop modes from disk ─────────────────────────────
             Components.WagonShopEnhancement.LoadModesFromDisk();
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.3 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.5 loaded.");
         }
     }
 }
