@@ -286,28 +286,12 @@ namespace ManifestDelivery.Patches
 
             if (data.ShopEnhancement.Mode == Components.ShopMode.Hub)
             {
-                // Apply +20% on top of the already-calculated capacity
-                var invField = typeof(TransportWagon).GetField("temporaryInventory",
-                    System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic |
-                    System.Reflection.BindingFlags.Instance);
-
-                if (invField != null)
-                {
-                    var inventory = invField.GetValue(__instance);
-                    if (inventory != null)
-                    {
-                        var capProp = inventory.GetType().GetProperty("carryCapacity",
-                            System.Reflection.BindingFlags.Public |
-                            System.Reflection.BindingFlags.Instance);
-
-                        if (capProp != null && capProp.CanWrite)
-                        {
-                            float current = (float)capProp.GetValue(inventory);
-                            capProp.SetValue(inventory, current * 1.20f);  // +20%
-                        }
-                    }
-                }
+                // Apply +20% on top of the already-calculated capacity.
+                // TransportWagon.temporaryInventory is public; ItemStorage.carryCapacity
+                // is a public property with setter. No reflection needed.
+                var inv = __instance.temporaryInventory;
+                if (inv != null)
+                    inv.carryCapacity *= 1.20f;
             }
         }
     }

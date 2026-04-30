@@ -64,7 +64,12 @@ namespace ManifestDelivery.Tasks
                 new WorkTaskID(WorkTaskType.ParkWagon),  // _taskID  (unused — we always return null)
                 false,                                   // _canEverBeAsync
                 0,                                       // baseMaxPriority
-                PriorityModifier)                        // _priorityModifier
+                PriorityModifier,                        // _priorityModifier
+                // Trip is JustDelivered-gated, not cooldown-gated, so zero out
+                // vanilla's fail-delay (default 2 s) — we don't want vanilla
+                // delaying the next check when our own flag controls frequency.
+                _delayBetweenNewTaskSearch: 0f,
+                _additionalDelayIfLastTaskSearchFailed: 0f)
         {
             _wagon = wagon;
             _data  = data;
@@ -94,10 +99,38 @@ namespace ManifestDelivery.Tasks
             // ── Clear the flag immediately so we only run once per delivery ──
             _data.JustDelivered = false;
 
+            // ── Capture diag context BEFORE the scan so we can log either branch ─
+            string diagMode = _data.ShopEnhancement != null
+                ? _data.ShopEnhancement.Mode.ToString() : "None";
+            Vector3 diagCenter;
+            float diagRadius;
+            bool diagShopAnchored = _data.ShopEnhancement != null
+                && (_data.ShopEnhancement.Mode == Components.ShopMode.Camp
+                    || _data.ShopEnhancement.Mode == Components.ShopMode.Hub);
+            if (diagShopAnchored && _data.ShopEnhancement != null)
+            {
+                diagCenter = _data.ShopEnhancement.transform.position;
+                diagRadius = _data.ShopEnhancement.WorkRadius;
+            }
+            else
+            {
+                diagCenter = _wagon.transform.position;
+                diagRadius = _data.ReturnTripRadius;
+            }
+
             // ── Find the best nearby requester ────────────────────────────────
             LogisticsRequester? best = FindBestNearbyRequester();
             if (best == null)
+            {
+                // Log the empty-scan so we can see WHEN backhaul tried but found
+                // nothing. One line per drop-off, not per frame — cost is fine.
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] ReturnTrip EMPTY ({diagMode}): {_wagon.name} " +
+                    $"— no candidates in {diagRadius:F0}u around " +
+                    $"{(diagShopAnchored ? "shop" : "wagon")} at " +
+                    $"({diagCenter.x:F0},{diagCenter.z:F0})");
                 return null;   // nothing nearby → fall through to ParkWagon
+            }
 
             // ── Temporarily assign the requester to this wagon ────────────────
             //    LogisticsRequester.AssignWorker propagates the assignment to
@@ -113,11 +146,18 @@ namespace ManifestDelivery.Tasks
                 _data.TemporaryRequester = best;
 
                 string items = DescribeMoveOut(best);
+                float distFromShop = diagShopAnchored
+                    ? Vector3.Distance(diagCenter, best.transform.position)
+                    : -1f;
+                string shopDistStr = distFromShop >= 0f
+                    ? $", {distFromShop:F0}u from shop"
+                    : "";
                 ManifestDeliveryMod.Log.Msg(
-                    $"[MD] ReturnTrip CLAIM: {_wagon.name} → " +
+                    $"[MD] ReturnTrip CLAIM ({diagMode}): {_wagon.name} → " +
                     $"{best.gameObject.name} " +
                     $"[{items}] " +
-                    $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u)");
+                    $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon" +
+                    $"{shopDistStr})");
             }
             catch (System.Exception ex)
             {
@@ -192,8 +232,20 @@ namespace ManifestDelivery.Tasks
 
             float radiusSqr = radius * radius;
 
+            // Two-tier tracking when PreferWorkshopInput is on:
+            //   bestWorkshop = closest non-storage requester (workshops, residences, etc.)
+            //   bestRequester = closest of all requesters (current vanilla behavior)
+            // If a workshop was found AND PreferWorkshopInput is true, return it.
+            // Otherwise return the overall closest. When the toggle is off,
+            // bestWorkshop is never populated (no extra cost) and behavior
+            // is identical to the original.
+            bool preferWorkshop = ManifestDeliveryMod.PreferWorkshopInput != null
+                                  && ManifestDeliveryMod.PreferWorkshopInput.Value;
+
             LogisticsRequester? bestRequester = null;
             float bestDistSqr = float.MaxValue;
+            LogisticsRequester? bestWorkshop = null;
+            float bestWorkshopDistSqr = float.MaxValue;
 
             foreach (LogisticsRequester requester in aggregator.activeStationaryRequestsRO)
             {
@@ -213,16 +265,79 @@ namespace ManifestDelivery.Tasks
                 // (delivery requests) with a relaxed threshold.
                 if (!HasEligibleRequest(requester, isCampMode)) continue;
 
-                // Pick closest to the wagon for efficient routing
+                // Score by distance to the WAGON (not the search center) — that's
+                // the actual driving distance the wagon will cover.
                 float wagonDistSqr = (requester.transform.position - _wagon.transform.position).sqrMagnitude;
+
+                // Track overall closest (vanilla behavior, also our fallback).
                 if (wagonDistSqr < bestDistSqr)
                 {
                     bestDistSqr  = wagonDistSqr;
                     bestRequester = requester;
                 }
+
+                // Also track closest workshop when the toggle is on.
+                if (preferWorkshop && !IsStorageBuilding(requester))
+                {
+                    if (wagonDistSqr < bestWorkshopDistSqr)
+                    {
+                        bestWorkshopDistSqr = wagonDistSqr;
+                        bestWorkshop = requester;
+                    }
+                }
             }
 
+            // Workshop wins if toggle is on and one was found in range.
+            // Otherwise fall through to overall closest (storage, etc.).
+            if (preferWorkshop && bestWorkshop != null)
+            {
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] Backhaul tier: workshop-priority chose {bestWorkshop.gameObject.name} " +
+                    $"(closest-overall would have been {bestRequester?.gameObject.name ?? "null"})");
+                return bestWorkshop;
+            }
             return bestRequester;
+        }
+
+        // ── Storage classification ────────────────────────────────────────────
+        // FF building types whose primary role is INVENTORY HOLDING. When
+        // PreferWorkshopInput is on, requesters living on these buildings are
+        // demoted to Tier-2 (only chosen if no Tier-1 workshop is in range).
+        // Add new storage types here if Crate adds more building types.
+        private static readonly System.Collections.Generic.HashSet<string> StorageTypeNames =
+            new System.Collections.Generic.HashSet<string>
+            {
+                "Storehouse",
+                "StorageDepot",
+                "RootCellar",
+                "Granary",
+                "Marketplace",
+                "Treasury",
+                "Stockyard",      // pre-built camp stockyard
+            };
+
+        /// <summary>
+        /// Returns true when this requester lives on a pure-storage building.
+        /// Walks up the GameObject parent chain looking for any MonoBehaviour
+        /// whose type name matches the storage list. Robust against requesters
+        /// being on child GameObjects (e.g. zone markers).
+        /// </summary>
+        private static bool IsStorageBuilding(LogisticsRequester req)
+        {
+            if (req == null || req.gameObject == null) return false;
+            Transform t = req.transform;
+            while (t != null)
+            {
+                var components = t.GetComponents<MonoBehaviour>();
+                foreach (var c in components)
+                {
+                    if (c == null) continue;
+                    if (StorageTypeNames.Contains(c.GetType().Name))
+                        return true;
+                }
+                t = t.parent;
+            }
+            return false;
         }
 
         /// <summary>

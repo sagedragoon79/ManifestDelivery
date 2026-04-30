@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.0", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.7", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -18,6 +18,7 @@ namespace ManifestDelivery
         // ── Return-trip backhaul ──────────────────────────────────────────────
         public static MelonPreferences_Entry<bool>  ReturnTripEnabled        { get; private set; } = null!;
         public static MelonPreferences_Entry<float> ReturnTripRadiusStandard { get; private set; } = null!;
+        public static MelonPreferences_Entry<bool>  PreferWorkshopInput      { get; private set; } = null!;
         // Camp and Hub modes use their WorkRadius (CampWorkRadius / HubWorkRadius)
         // for ReturnTrip scans — keeping one radius per mode (the shop's service area).
 
@@ -74,6 +75,16 @@ namespace ManifestDelivery
                 display_name: "Return Trip Radius – Standard",
                 description:  "World-unit search radius for Standard mode shops.");
 
+            PreferWorkshopInput = cat.CreateEntry(
+                "PreferWorkshopInput", false,
+                display_name: "Prefer Workshop Input on Backhaul",
+                description:  "When true, after a drop-off the wagon prefers backhaul targets " +
+                              "that feed PRODUCTION (Bakery, Smithy, Tannery, Carpenter, etc.) " +
+                              "over storage shuffling (Storehouse, Storage Depot, Root Cellar, " +
+                              "Granary, Marketplace). Workshops always win when in range, " +
+                              "regardless of distance. Falls back to closest-storage when no " +
+                              "workshops have requests. Default false (vanilla closest-wins).");
+
             // ── Wagon cap settings ───────────────────────────────────────────
             MaxWagonsStandard = cat.CreateEntry(
                 "MaxWagonsStandard", 2,
@@ -120,9 +131,13 @@ namespace ManifestDelivery
 
             StorageCartSpeedMult = cat.CreateEntry(
                 "StorageCartSpeedMult", 1.5f,
-                display_name: "Storage Cart Speed Multiplier",
-                description:  "Multiplier for Transport Wagon movement speed when hauling " +
-                              "to/from a Storage Cart in camp mode.");
+                display_name: "Storage Cart Relocation Speed Multiplier",
+                description:  "Storage Carts are classified as buildings, not wagons. When " +
+                              "the player clicks the 'rally to point' button the game plays " +
+                              "a movement animation but internally issues a building " +
+                              "relocation. This multiplier scales that relocation speed " +
+                              "(i.e. how fast the cart 'drives' itself to the rally point). " +
+                              "Does NOT affect Transport Wagons hauling items to/from carts.");
 
             // ── Mode cycling key ─────────────────────────────────────────────
             ModeCycleKeyName = cat.CreateEntry(
@@ -148,10 +163,12 @@ namespace ManifestDelivery
             Patches.WagonSelectButtonPatches.Register(HarmonyInstance);
             Patches.WagonShopAwakePrefix.Register(HarmonyInstance);
 
-            // ── Load saved shop modes from disk ─────────────────────────────
-            Components.WagonShopEnhancement.LoadModesFromDisk();
+            // Modes are now loaded lazily per-save via EnsureLoadedForCurrentSave()
+            // (called from RestoreSavedMode + GetSavedModeForPosition). Loading at
+            // mod init would use an empty save-name, and the file would leak across
+            // different save games — this sidesteps both.
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.0 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.7 loaded.");
         }
     }
 }

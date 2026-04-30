@@ -43,25 +43,105 @@ namespace ManifestDelivery.Components
     public class WagonShopEnhancement : MonoBehaviour
     {
         // ── Persistent mode storage ──────────────────────────────────────────
-        // Modes are saved per-shop using position-based keys (same pattern as
-        // Tended Wilds priority persistence). Survives save/load because the
-        // dictionary is static and keyed by building position, not instance ID.
+        // Modes are saved per-shop AND per-save-file. Previous version used a
+        // single global file, which caused mode state to leak between different
+        // save files (save A's shops overwrote save B's when the user switched
+        // saves in the same session). Now each save file has its own modes file
+        // under UserData/ManifestDelivery_Modes/<saveName>.txt.
+        //
+        // Position hash: prior version collapsed axes via (x*1000 + z) which
+        // hit real collisions at close shop pairs. Now combined via (ix*397)^iz
+        // on rounded integer coordinates — no axis collapse.
 
         private static readonly Dictionary<int, ShopMode> SavedModes =
             new Dictionary<int, ShopMode>();
 
-        private static readonly string SaveFilePath =
-            Path.Combine(Application.dataPath, "..", "UserData", "ManifestDelivery_ShopModes.txt");
+        // Tracks which save the SavedModes dict was populated for. Empty string
+        // means "not yet loaded for any save." Matches SaveManager.activeSaveFileName
+        // once loaded, so re-entry after save-switch reloads correctly.
+        private static string _loadedForSave = null!;
+
+        private const string ModesDirName = "ManifestDelivery_Modes";
+
+        private static string GetSaveFilePath(string saveName)
+        {
+            // Sanitize — a save name could in theory contain path-invalid chars.
+            string safe = saveName;
+            if (string.IsNullOrEmpty(safe)) safe = "default";
+            foreach (char c in Path.GetInvalidFileNameChars())
+                safe = safe.Replace(c, '_');
+            return Path.Combine(
+                Application.dataPath, "..", "UserData", ModesDirName,
+                $"{safe}.txt");
+        }
+
+        private static string GetActiveSaveName()
+        {
+            try { return SaveManager.activeSaveFileName ?? ""; }
+            catch { return ""; }
+        }
+
+        /// <summary>
+        /// Ensures SavedModes is populated for the currently-active save. Safe
+        /// to call from anywhere; no-ops if already loaded for this save. Also
+        /// handles the mid-session save-switch case (main menu → load a
+        /// different save) by clearing + reloading when the save name changes.
+        /// </summary>
+        public static void EnsureLoadedForCurrentSave()
+        {
+            string current = GetActiveSaveName();
+            if (_loadedForSave == current) return;
+            _loadedForSave = current;
+            SavedModes.Clear();
+
+            string path = GetSaveFilePath(current);
+            if (!File.Exists(path))
+            {
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] No modes file for save '{current}' — starting fresh.");
+                return;
+            }
+
+            try
+            {
+                foreach (var line in File.ReadAllLines(path))
+                {
+                    var parts = line.Split(':');
+                    if (parts.Length != 2) continue;
+                    if (!int.TryParse(parts[0], out int key)) continue;
+                    if (!System.Enum.TryParse(parts[1], out ShopMode mode)) continue;
+                    SavedModes[key] = mode;
+                }
+
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] Loaded {SavedModes.Count} shop mode(s) for save '{current}'.");
+                foreach (var kvp in SavedModes)
+                    ManifestDeliveryMod.Log.Msg($"[MD]   key={kvp.Key} mode={kvp.Value}");
+            }
+            catch (System.Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] EnsureLoadedForCurrentSave failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Stable hash combining rounded X and Z as independent dimensions.
+        /// Two positions need both round-X and round-Z to match to collide,
+        /// which is extremely unlikely for two buildings on a real map.
+        /// </summary>
+        private static int ComputeShopKey(Vector3 pos)
+        {
+            int ix = Mathf.RoundToInt(pos.x);
+            int iz = Mathf.RoundToInt(pos.z);
+            unchecked { return (ix * 397) ^ iz; }
+        }
 
         /// <summary>
         /// Position-based hash key for this shop. Survives building upgrades
         /// and save/load cycles since position doesn't change.
         /// </summary>
-        private int GetShopKey()
-        {
-            var pos = transform.position;
-            return Mathf.RoundToInt(pos.x * 1000f + pos.z);
-        }
+        private int GetShopKey() => ComputeShopKey(transform.position);
 
         /// <summary>
         /// Public lookup used by early-boot patches (before our enhancement
@@ -70,7 +150,8 @@ namespace ManifestDelivery.Components
         /// </summary>
         public static ShopMode? GetSavedModeForPosition(Vector3 pos)
         {
-            int key = Mathf.RoundToInt(pos.x * 1000f + pos.z);
+            EnsureLoadedForCurrentSave();
+            int key = ComputeShopKey(pos);
             if (SavedModes.TryGetValue(key, out ShopMode m))
                 return m;
             return null;
@@ -89,21 +170,23 @@ namespace ManifestDelivery.Components
             };
 
         /// <summary>
-        /// Save all shop modes to disk. Called on mode change.
-        /// Format: one line per shop, "key:mode" (e.g., "1234567:Camp").
+        /// Save all shop modes to disk for the currently-active save.
+        /// Called on mode change. Format: one line per shop, "key:mode".
         /// </summary>
         public static void SaveModesToDisk()
         {
             try
             {
-                var dir = Path.GetDirectoryName(SaveFilePath);
+                string current = GetActiveSaveName();
+                string path = GetSaveFilePath(current);
+                var dir = Path.GetDirectoryName(path);
                 if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
 
                 var lines = new List<string>();
                 foreach (var kvp in SavedModes)
                     lines.Add($"{kvp.Key}:{kvp.Value}");
 
-                File.WriteAllLines(SaveFilePath, lines.ToArray());
+                File.WriteAllLines(path, lines.ToArray());
             }
             catch (System.Exception ex)
             {
@@ -112,35 +195,10 @@ namespace ManifestDelivery.Components
         }
 
         /// <summary>
-        /// Load shop modes from disk. Called once during mod initialization
-        /// (scene load). Populates the static SavedModes dictionary so
-        /// RestoreSavedMode() can find each shop's mode by position key.
+        /// Kept for backward compatibility with any external callers. Delegates
+        /// to EnsureLoadedForCurrentSave which is save-aware.
         /// </summary>
-        public static void LoadModesFromDisk()
-        {
-            try
-            {
-                if (!File.Exists(SaveFilePath)) return;
-
-                SavedModes.Clear();
-                foreach (var line in File.ReadAllLines(SaveFilePath))
-                {
-                    var parts = line.Split(':');
-                    if (parts.Length != 2) continue;
-                    if (!int.TryParse(parts[0], out int key)) continue;
-                    if (!System.Enum.TryParse(parts[1], out ShopMode mode)) continue;
-                    SavedModes[key] = mode;
-                }
-
-                ManifestDeliveryMod.Log.Msg($"[MD] Loaded {SavedModes.Count} shop mode(s) from disk.");
-                foreach (var kvp in SavedModes)
-                    ManifestDeliveryMod.Log.Msg($"[MD]   saved key={kvp.Key} mode={kvp.Value}");
-            }
-            catch (System.Exception ex)
-            {
-                ManifestDeliveryMod.Log.Warning($"[MD] LoadModesFromDisk failed: {ex.Message}");
-            }
-        }
+        public static void LoadModesFromDisk() => EnsureLoadedForCurrentSave();
 
         // ── State ─────────────────────────────────────────────────────────────
 
@@ -166,6 +224,7 @@ namespace ManifestDelivery.Components
         /// </summary>
         private void RestoreSavedMode()
         {
+            EnsureLoadedForCurrentSave();
             int key = GetShopKey();
             if (SavedModes.TryGetValue(key, out ShopMode savedMode) && savedMode != _mode)
             {
@@ -215,11 +274,6 @@ namespace ManifestDelivery.Components
         };
 
         /// <summary>
-        /// Camp work radius — kept for backward compat, delegates to WorkRadius.
-        /// </summary>
-        public float CampWorkRadius => ManifestDeliveryMod.CampWorkRadius.Value;
-
-        /// <summary>
         /// Returns true when this shop is in Camp mode and camp hauling is enabled.
         /// </summary>
         public bool IsCampHaulActive =>
@@ -228,43 +282,15 @@ namespace ManifestDelivery.Components
         // ── Camp zone helpers ─────────────────────────────────────────────────
 
         /// <summary>
-        /// Tests whether a world position is within this shop's camp work radius.
+        /// Tests whether a world position is within this shop's work radius.
+        /// Uses the mode-appropriate radius (Camp=CampWorkRadius,
+        /// Hub=HubWorkRadius, Standard=ReturnTripRadius) via the WorkRadius
+        /// property so the check matches what the other subsystems anchor to.
         /// </summary>
-        public bool IsWithinCampRadius(Vector3 position)
+        public bool IsWithinWorkRadius(Vector3 position)
         {
-            float radiusSqr = CampWorkRadius * CampWorkRadius;
+            float radiusSqr = WorkRadius * WorkRadius;
             return (position - transform.position).sqrMagnitude <= radiusSqr;
-        }
-
-        /// <summary>
-        /// Finds all LogisticsRequesters within the camp work radius that have
-        /// active TakeOut (move-out) requests. These are production buildings
-        /// with goods waiting to be picked up.
-        /// </summary>
-        public List<LogisticsRequester> FindNearbyMoveOutRequesters()
-        {
-            var results = new List<LogisticsRequester>();
-            if (!IsCampHaulActive) return results;
-
-            GameManager? gm = UnitySingleton<GameManager>.Instance;
-            if (gm == null) return results;
-
-            float radiusSqr = CampWorkRadius * CampWorkRadius;
-            Vector3 shopPos = transform.position;
-
-            foreach (LogisticsRequester requester in gm.logisiticsAggregator.activeStationaryRequestsRO)
-            {
-                if (!requester.hasActiveRequests) continue;
-
-                float distSqr = (requester.transform.position - shopPos).sqrMagnitude;
-                if (distSqr > radiusSqr) continue;
-
-                // Only include requesters that have move-out requests (goods to pick up)
-                if (requester.activeMoveOutRequests.Count > 0)
-                    results.Add(requester);
-            }
-
-            return results;
         }
 
         // ── Mode display name (shown in HUD label) ────────────────────────────
@@ -324,16 +350,18 @@ namespace ManifestDelivery.Components
 
         // ── Work area visual circle ──────────────────────────────────────────
 
-        private WorkArea? _workArea;
+        private SelectionCircle? _selectionCircle;
 
         /// <summary>
         /// Creates or updates the visual radius circle around the Wagon Shop.
         /// Shown in Camp and Hub modes, hidden in Standard.
         ///
-        /// CRITICAL: After Init() we must call SelectionCircle.CreateEdgeObjects()
-        /// via reflection to regenerate edge mesh positions. SelectionCircle only
-        /// bakes edge positions once in its Start() method; subsequent radius
-        /// changes don't update the visual unless we force a rebuild.
+        /// Uses a plain SelectionCircle (not WorkArea). WorkArea would register
+        /// the shop as a work-assignment target in the game's global work-area
+        /// system, which scrambles other work-area buildings (notably fishing
+        /// shacks' fish-available UI). The shop's task filtering lives in
+        /// CampHaulSearchEntry/ReturnTripSearchEntry via direct distance math
+        /// on shop.WorkRadius — no WorkArea component required.
         /// </summary>
         private void UpdateWorkAreaCircle()
         {
@@ -344,31 +372,36 @@ namespace ManifestDelivery.Components
                 if (radius <= 0f)
                 {
                     // Standard mode — hide circle if it exists
-                    if (_workArea != null)
-                        _workArea.SetEnabled(false);
+                    if (_selectionCircle != null)
+                        _selectionCircle.SetEnabled(false);
                     return;
                 }
 
-                // Create WorkArea component if needed
-                if (_workArea == null)
+                // Create SelectionCircle component if needed
+                if (_selectionCircle == null)
                 {
-                    _workArea = gameObject.GetComponent<WorkArea>();
-                    if (_workArea == null)
-                        _workArea = gameObject.AddComponent<WorkArea>();
+                    _selectionCircle = gameObject.GetComponent<SelectionCircle>();
+                    if (_selectionCircle == null)
+                        _selectionCircle = gameObject.AddComponent<SelectionCircle>();
                 }
 
-                // Initialize with current position and radius
-                _workArea.Init(transform.position, radius);
-
-                // Force the underlying SelectionCircle to regenerate edge meshes
-                // with the new radius value. Without this, the visible ring
-                // stays at whatever radius SelectionCircle.Start captured initially.
-                RegenerateSelectionCircleEdges(_workArea);
+                // Initialize with current position and radius, then force the
+                // edge meshes to regenerate at the new radius. SelectionCircle
+                // only bakes edge positions once in its Start() method, so
+                // subsequent radius changes don't update the visual without
+                // an explicit CreateEdgeObjects() call.
+                _selectionCircle.Init(transform.position, radius);
+                try { _selectionCircle.CreateEdgeObjects(); }
+                catch (System.Exception ex)
+                {
+                    ManifestDeliveryMod.Log.Warning(
+                        $"[MD] SelectionCircle.CreateEdgeObjects failed: {ex.Message}");
+                }
 
                 // Only enable visibility when the shop is currently selected.
                 // Actual show/hide is handled in Update() based on IsSelected.
                 var sel = GetComponent<SelectableComponent>();
-                _workArea.SetEnabled(sel != null && sel.IsSelected);
+                _selectionCircle.SetEnabled(sel != null && sel.IsSelected);
 
                 ManifestDeliveryMod.Log.Msg(
                     $"[MD] {gameObject.name} work area circle: {radius:F0}u radius");
@@ -377,33 +410,6 @@ namespace ManifestDelivery.Components
             {
                 ManifestDeliveryMod.Log.Warning(
                     $"[MD] UpdateWorkAreaCircle failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Forces the WorkArea's SelectionCircle to regenerate its edge meshes
-        /// at the current radius. Uses reflection because `selectionCircle` is
-        /// a private field on WorkArea, but CreateEdgeObjects is public.
-        /// </summary>
-        private static void RegenerateSelectionCircleEdges(WorkArea workArea)
-        {
-            try
-            {
-                var scField = typeof(WorkArea).GetField("selectionCircle", AllInstance);
-                if (scField == null) return;
-
-                var selectionCircle = scField.GetValue(workArea);
-                if (selectionCircle == null) return;
-
-                var createEdges = selectionCircle.GetType().GetMethod(
-                    "CreateEdgeObjects",
-                    BindingFlags.Public | BindingFlags.Instance);
-                createEdges?.Invoke(selectionCircle, null);
-            }
-            catch (System.Exception ex)
-            {
-                ManifestDeliveryMod.Log.Warning(
-                    $"[MD] RegenerateSelectionCircleEdges failed: {ex.Message}");
             }
         }
 
@@ -545,8 +551,8 @@ namespace ManifestDelivery.Components
             if (shouldShow != _lastSelectedState)
             {
                 _lastSelectedState = shouldShow;
-                if (_workArea != null && WorkRadius > 0f)
-                    _workArea.SetEnabled(shouldShow);
+                if (_selectionCircle != null && WorkRadius > 0f)
+                    _selectionCircle.SetEnabled(shouldShow);
             }
 
             // Mode buttons are injected via Harmony postfix on

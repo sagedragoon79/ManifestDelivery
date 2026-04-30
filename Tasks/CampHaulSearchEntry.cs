@@ -57,7 +57,14 @@ namespace ManifestDelivery.Tasks
                 new WorkTaskID(WorkTaskType.ParkWagon),  // _taskID (unused — we always return null)
                 false,                                   // _canEverBeAsync
                 0,                                       // baseMaxPriority
-                PriorityModifier)                        // _priorityModifier
+                PriorityModifier,                        // _priorityModifier
+                // Align vanilla's search-delay with our intended scan cadence.
+                // Default _additionalDelayIfLastTaskSearchFailed is 2 s; since
+                // ProcessNewTask always returns null, that 2 s would mask our
+                // 1.5 s cooldown. Set both to 0 — our own NextCampHaulScanTime
+                // gate enforces the intended cadence.
+                _delayBetweenNewTaskSearch: 0f,
+                _additionalDelayIfLastTaskSearchFailed: 0f)
         {
             _wagon = wagon;
             _data  = data;
@@ -92,9 +99,20 @@ namespace ManifestDelivery.Tasks
             _data.NextCampHaulScanTime = Time.time + ScanCooldown;
 
             // ── Find the best nearby source (building with goods to move out) ──
+            Vector3 diagShopPos = shop.transform.position;
+            float   diagRadius  = shop.WorkRadius;
             LogisticsRequester? bestSource = FindBestCampSource();
             if (bestSource == null)
+            {
+                // Log empty-scan rate-limited by the scan cooldown (every ~1.5s
+                // or 2s due to vanilla fail-delay). Helps see when CampHaul
+                // tries to claim but the camp has nothing eligible right now.
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] CampHaul EMPTY: {_wagon.name} " +
+                    $"— no camp sources in {diagRadius:F0}u around shop at " +
+                    $"({diagShopPos.x:F0},{diagShopPos.z:F0})");
                 return null;
+            }
 
             // ── Temporarily assign the requester to this wagon ──────────────
             try
@@ -107,11 +125,14 @@ namespace ManifestDelivery.Tasks
                 _data.CampHaulRequester = bestSource;
 
                 string items = DescribeMoveOut(bestSource);
+                float distFromShop = Vector3.Distance(
+                    diagShopPos, bestSource.transform.position);
                 ManifestDeliveryMod.Log.Msg(
                     $"[MD] CampHaul CLAIM: {_wagon.name} → " +
                     $"{bestSource.gameObject.name} " +
                     $"[{items}] " +
-                    $"({Vector3.Distance(_wagon.transform.position, bestSource.transform.position):F1}u)");
+                    $"({Vector3.Distance(_wagon.transform.position, bestSource.transform.position):F1}u from wagon, " +
+                    $"{distFromShop:F0}u from shop)");
             }
             catch (System.Exception ex)
             {
