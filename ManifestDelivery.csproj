@@ -4,9 +4,9 @@
     <TargetFramework>net46</TargetFramework>
     <AssemblyName>ManifestDelivery</AssemblyName>
     <RootNamespace>ManifestDelivery</RootNamespace>
-    <Version>1.0.7.0</Version>
-    <FileVersion>1.0.7.0</FileVersion>
-    <AssemblyVersion>1.0.7.0</AssemblyVersion>
+    <Version>1.0.8.0</Version>
+    <FileVersion>1.0.8.0</FileVersion>
+    <AssemblyVersion>1.0.8.0</AssemblyVersion>
     <Description>Wagon Shop overhaul mod for Farthest Frontier</Description>
     <Company>SageDragoon</Company>
     <Product>Manifest Delivery</Product>

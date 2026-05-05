@@ -5,6 +5,24 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.8] — 2026-04-26
+
+### Added
+- **Keep Clarity settings-panel integration.** When KeepClarity.dll is
+  installed, Manifest Delivery's preferences appear in the in-game
+  settings panel with proper labels, tooltips, sliders, sub-categories
+  (Master, Wagon Caps, Backhaul AI, Camp & Hub, Storage Cart, Hotkeys),
+  and `VisibleWhen` gating (e.g. radius is hidden when backhaul is
+  disabled). All access is reflective — KeepClarity is a soft dependency,
+  not a build dep.
+- New `KeepClarityIntegration.cs` follows the canonical WotW template.
+  Registers a wagon-tan accent colour and order=20 in the panel.
+
+### Internal
+- Version bump `1.0.7.0` → `1.0.8.0`.
+
+---
+
 ## [1.0.7] — 2026-04-26
 
 ### Fixed
