@@ -104,15 +104,21 @@ namespace ManifestDelivery.Tasks
             LogisticsRequester? bestSource = FindBestCampSource();
             if (bestSource == null)
             {
-                // Log empty-scan rate-limited by the scan cooldown (every ~1.5s
-                // or 2s due to vanilla fail-delay). Helps see when CampHaul
-                // tries to claim but the camp has nothing eligible right now.
-                ManifestDeliveryMod.Log.Msg(
-                    $"[MD] CampHaul EMPTY: {_wagon.name} " +
-                    $"— no camp sources in {diagRadius:F0}u around shop at " +
-                    $"({diagShopPos.x:F0},{diagShopPos.z:F0})");
+                // Log only on the transition from "finding work" → "now empty"
+                // so an idle camp doesn't generate a line every scan cooldown.
+                // Earlier logs were dominated by hundreds of EMPTY lines per
+                // minute when wagons were waiting for new production.
+                if (!_data.LastCampHaulScanWasEmpty)
+                {
+                    _data.LastCampHaulScanWasEmpty = true;
+                    ManifestDeliveryMod.Log.Msg(
+                        $"[MD] CampHaul EMPTY: {_wagon.name} " +
+                        $"— no camp sources in {diagRadius:F0}u around shop at " +
+                        $"({diagShopPos.x:F0},{diagShopPos.z:F0})");
+                }
                 return null;
             }
+            _data.LastCampHaulScanWasEmpty = false;
 
             // ── Temporarily assign the requester to this wagon ──────────────
             try

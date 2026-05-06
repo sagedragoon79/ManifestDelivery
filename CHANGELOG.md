@@ -5,6 +5,31 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.9] — 2026-04-26
+
+### Performance
+- **Storage classification cache** in `ReturnTripSearchEntry`. Previously
+  every backhaul scan walked the parent transform of every candidate
+  requester and called `GetComponents<MonoBehaviour>` to test for storage
+  type names — hundreds of allocations per second on a busy map. Now
+  cached per-`LogisticsRequester` for the lifetime of the scene.
+- Cache is cleared on `OnSceneWasLoaded` so destroyed-then-replaced
+  requesters from the previous map don't leak as Unity-null dictionary
+  keys (which still hash but won't equate).
+
+### Changed
+- **CampHaul EMPTY log** rate-limited to state transitions only
+  (was-finding → just-emptied), instead of one line per scan cooldown.
+  Idle camps with no production used to spam hundreds of EMPTY lines
+  per minute into the Melon log; now they emit once when work runs out
+  and stay quiet until production restarts. New `LastCampHaulScanWasEmpty`
+  flag on `WagonEnhancementData` tracks the prior-scan state.
+
+### Internal
+- Version bump `1.0.8.0` → `1.0.9.0`.
+
+---
+
 ## [1.0.8] — 2026-04-26
 
 ### Added

@@ -316,6 +316,21 @@ namespace ManifestDelivery.Tasks
                 "Stockyard",      // pre-built camp stockyard
             };
 
+        // Per-requester cache of IsStorageBuilding result. Lifetime-stable —
+        // a building's storage classification can't change without the building
+        // being destroyed and replaced (upgrades create new instances). Drops
+        // ~800 transform-walks + GetComponents allocations per second to
+        // amortized zero after warmup. See ClearStorageCache for invalidation.
+        private static readonly System.Collections.Generic.Dictionary<LogisticsRequester, bool> _storageCache
+            = new System.Collections.Generic.Dictionary<LogisticsRequester, bool>();
+
+        /// <summary>
+        /// Clears the storage classification cache. Called on scene unload so
+        /// the next load doesn't carry over destroyed requesters as dead
+        /// dictionary keys (Unity-null Object references hash but won't ==).
+        /// </summary>
+        public static void ClearStorageCache() => _storageCache.Clear();
+
         /// <summary>
         /// Returns true when this requester lives on a pure-storage building.
         /// Walks up the GameObject parent chain looking for any MonoBehaviour
@@ -325,6 +340,14 @@ namespace ManifestDelivery.Tasks
         private static bool IsStorageBuilding(LogisticsRequester req)
         {
             if (req == null || req.gameObject == null) return false;
+            if (_storageCache.TryGetValue(req, out bool cached)) return cached;
+            bool result = ComputeIsStorageBuilding(req);
+            _storageCache[req] = result;
+            return result;
+        }
+
+        private static bool ComputeIsStorageBuilding(LogisticsRequester req)
+        {
             Transform t = req.transform;
             while (t != null)
             {

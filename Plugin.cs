@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.8", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.9", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -168,10 +168,19 @@ namespace ManifestDelivery
             // mod init would use an empty save-name, and the file would leak across
             // different save games — this sidesteps both.
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.8 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.9 loaded.");
 
             // Optional: register with Keep Clarity's settings panel if installed.
             KeepClarityIntegration.TryRegisterAll();
+        }
+
+        public override void OnSceneWasLoaded(int buildIndex, string sceneName)
+        {
+            // Drop the per-requester storage-classification cache between
+            // saves — its keys are LogisticsRequester references that get
+            // replaced on map reload, and a Unity-null Object key still
+            // hashes (would leak slowly across multiple loads).
+            ManifestDelivery.Tasks.ReturnTripSearchEntry.ClearStorageCache();
         }
     }
 }

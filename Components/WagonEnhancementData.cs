@@ -67,6 +67,14 @@ namespace ManifestDelivery.Components
         public float NextCampHaulScanTime { get; set; }
 
         /// <summary>
+        /// True when the previous CampHaul scan found no eligible source.
+        /// Used to throttle the "CampHaul EMPTY" log line to state transitions
+        /// only (was-finding → just-emptied), avoiding many lines per second of
+        /// disk I/O when wagons are idle in a slow camp.
+        /// </summary>
+        public bool LastCampHaulScanWasEmpty { get; set; }
+
+        /// <summary>
         /// The requester assigned during a camp haul search.
         /// Stored for cleanup if the wagon parks without executing.
         /// </summary>
