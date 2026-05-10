@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.9", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.10", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -38,6 +38,12 @@ namespace ManifestDelivery
 
         // ── Mode cycling keybind ──────────────────────────────────────────────
         public static MelonPreferences_Entry<string> ModeCycleKeyName { get; private set; } = null!;
+
+        // ── Per-shop hauling stats ────────────────────────────────────────────
+        public static MelonPreferences_Entry<bool>   StatsEnabled    { get; private set; } = null!;
+        public static MelonPreferences_Entry<string> StatsReportKey  { get; private set; } = null!;
+        private static KeyCode _statsReportKey = KeyCode.M;
+        public static KeyCode StatsReportKey_Resolved => _statsReportKey;
 
         // ── Resolved keybind (parsed from ModeCycleKeyName) ──────────────────
         private static KeyCode _modeCycleKey = KeyCode.M;
@@ -153,6 +159,28 @@ namespace ManifestDelivery
             else
                 LoggerInstance.Warning($"[MD] Could not parse ModeCycleKey \"{ModeCycleKeyName.Value}\", defaulting to M.");
 
+            // ── Per-shop hauling stats ───────────────────────────────────────
+            StatsEnabled = cat.CreateEntry(
+                "StatsEnabled", true,
+                display_name: "Hauling Stats — Enabled",
+                description:  "When true, the mod records every wagon delivery into a " +
+                              "per-shop stats file (lifetime + year-to-date totals, " +
+                              "per-item breakdown, raw vs produced split). Press the " +
+                              "report key (default Ctrl+Shift+M) to dump a formatted " +
+                              "report to the MelonLoader log.");
+
+            StatsReportKey = cat.CreateEntry(
+                "StatsReportKey", "M",
+                display_name: "Hauling Stats — Report Key",
+                description:  "Press CTRL+SHIFT+<this key> to dump the per-shop hauling " +
+                              "report to the MelonLoader log. Use Unity KeyCode name " +
+                              "(e.g. M, J, F8).");
+
+            if (System.Enum.TryParse(StatsReportKey.Value, ignoreCase: true, out KeyCode statsKey))
+                _statsReportKey = statsKey;
+            else
+                LoggerInstance.Warning($"[MD] Could not parse StatsReportKey \"{StatsReportKey.Value}\", defaulting to M.");
+
             // ── Apply Harmony patches ────────────────────────────────────────
             HarmonyInstance.PatchAll();
 
@@ -168,7 +196,7 @@ namespace ManifestDelivery
             // mod init would use an empty save-name, and the file would leak across
             // different save games — this sidesteps both.
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.9 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.10 loaded.");
 
             // Optional: register with Keep Clarity's settings panel if installed.
             KeepClarityIntegration.TryRegisterAll();
@@ -181,6 +209,31 @@ namespace ManifestDelivery
             // replaced on map reload, and a Unity-null Object key still
             // hashes (would leak slowly across multiple loads).
             ManifestDelivery.Tasks.ReturnTripSearchEntry.ClearStorageCache();
+
+            // Stats are per-save: drop in-memory snapshot so the next
+            // delivery on a different save doesn't append onto the previous
+            // save's totals. Reload happens lazily on first delivery.
+            ManifestDelivery.Systems.StatsTracker.Clear();
+        }
+
+        public override void OnUpdate()
+        {
+            // Stats report keybind: CTRL+SHIFT+<configured key>
+            if (StatsEnabled != null && StatsEnabled.Value
+                && Input.GetKeyDown(_statsReportKey)
+                && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+                && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
+            {
+                ManifestDelivery.Systems.StatsTracker.DumpReportToLog();
+            }
+        }
+
+        public override void OnApplicationQuit()
+        {
+            // Flush stats to disk on game exit so we don't lose unsaved data
+            // when the player quits without triggering SaveManager.Save.
+            try { ManifestDelivery.Systems.StatsTracker.SaveToDisk(); }
+            catch { /* best effort on shutdown */ }
         }
     }
 }

@@ -5,6 +5,52 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.10] — 2026-04-26
+
+### Added
+- **Per-shop hauling stats.** New aggregator records every wagon delivery
+  into a position-keyed shop record. Tracks **lifetime** and **year-to-date**
+  totals separately — vanilla resets at year boundary, our totals keep
+  accumulating. The Steam Workshop description now mentions this as the
+  upgrade-feature for the v1.0.10 release.
+- **Item breakdown** per shop: top-N items hauled all-time and this year.
+  Vanilla shows the trip count but not what was actually carried.
+- **Raw vs Produced split** — see `ItemCategoryClassifier.cs` for the rule
+  list. Stone, Wheat, Berries, RawMeat, Hide, Honey, Wool etc. count as
+  Raw; Bread, Lumber, Cloth, Cheese, Beer, Charcoal, Firewood etc. count
+  as Produced. Per-game-version mismatches are silently ignored.
+- **Per-mode trip counts** per shop (Standard / Camp / Hub) — useful when
+  comparing how much work each mode actually does for you.
+- **Report keybind** (default `Ctrl+Shift+M`, configurable via
+  `StatsReportKey`). Press in-game to dump a formatted breakdown to the
+  MelonLoader log.
+- **`StatsEnabled` toggle** (default `true`). Set false to skip recording
+  entirely; existing files are left untouched on disk.
+
+### Persistence
+- Stats stored per-save under `UserData/ManifestDelivery_Stats/<saveName>.txt`.
+- Same per-save isolation as the modes file — no cross-save leaks.
+- Flushed on `SaveManager.Save`, `OnApplicationQuit`, and scene transitions.
+- Custom binary-ish text format (one line per record); easy to inspect or
+  hand-edit if you need to reset a counter.
+
+### Internal
+- New `Components/WagonShopStats.cs`, `Systems/StatsTracker.cs`,
+  `Systems/ItemCategoryClassifier.cs`, `Patches/StatsSavePatch.cs`,
+  delivery hook integration in `Patches/DeliveryLogPatches.cs`.
+- Reflection-based resolver for `UserDataDirectory` so the mod compiles
+  cleanly across MelonLoader pre-0.7 (`MelonUtils`) and 0.7+
+  (`MelonEnvironment`) without obsolete-API errors.
+- Reflection-based resolver for `TimeManager.year` (or `Year`/`currentYear`/
+  etc.) so YTD rollover works regardless of FF's exact field name.
+
+### Note
+- Vanilla wagon UI still shows per-wagon current/last-year delivery
+  counts. This feature is the per-SHOP layer that aggregates across all
+  the wagons of that shop, plus item breakdown that vanilla doesn't show.
+
+---
+
 ## [1.0.9] — 2026-04-26
 
 ### Performance
