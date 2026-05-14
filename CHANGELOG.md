@@ -5,6 +5,22 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.11] — 2026-05-12
+
+### Fixed
+- **Compat with the current Farthest Frontier build.** FF moved
+  `GameManager.logisiticsAggregator` to non-public access (and may have
+  fixed the typo to `logisticsAggregator`), which broke the direct
+  field access we used for the logistics scanner. Both
+  `ReturnTripSearchEntry` and `CampHaulSearchEntry` now resolve the
+  aggregator via reflection, trying both the original typo'd name and
+  the corrected one — works across game-build versions either way.
+
+### Internal
+- Version bump `1.0.10.0` → `1.0.11.0`.
+
+---
+
 ## [1.0.10] — 2026-04-26
 
 ### Added

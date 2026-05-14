@@ -160,6 +160,9 @@ namespace ManifestDelivery.Tasks
 
             GameManager? gm = UnitySingleton<GameManager>.Instance;
             if (gm == null) return null;
+            // FF made this field non-public — use the shared reflection helper.
+            LogisticsAggregator? aggregator = ReturnTripSearchEntry.GetAggregatorPublic(gm);
+            if (aggregator == null) return null;
 
             float radiusSqr = shop.WorkRadius * shop.WorkRadius;
             Vector3 shopPos = shop.transform.position;
@@ -167,7 +170,7 @@ namespace ManifestDelivery.Tasks
             LogisticsRequester? bestRequester = null;
             float bestDistSqr = float.MaxValue;
 
-            foreach (LogisticsRequester requester in gm.logisiticsAggregator.activeStationaryRequestsRO)
+            foreach (LogisticsRequester requester in aggregator.activeStationaryRequestsRO)
             {
                 if (!requester.hasActiveRequests) continue;
                 if (requester.activeMoveOutRequests.Count == 0) continue;

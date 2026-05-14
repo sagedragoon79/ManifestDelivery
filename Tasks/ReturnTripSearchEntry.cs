@@ -468,18 +468,24 @@ namespace ManifestDelivery.Tasks
         {
             GameManager? gm = UnitySingleton<GameManager>.Instance;
             if (gm == null) return null;
+            return GetAggregatorPublic(gm);
+        }
 
-            // Try direct field access first (faster).
-            try { return gm.logisiticsAggregator; }
-            catch { /* field name mismatch — fall through to reflection */ }
-
-            // Reflection fallback (handles any future rename).
-            var field = typeof(GameManager).GetField(
-                "logisiticsAggregator",
+        /// <summary>
+        /// Shared with CampHaulSearchEntry. Reflection-only because FF made
+        /// the field non-public in a recent build (and may have fixed its
+        /// typo 'logisiticsAggregator' → 'logisticsAggregator'). We try both
+        /// spellings so we work across game versions either way.
+        /// </summary>
+        internal static LogisticsAggregator? GetAggregatorPublic(GameManager gm)
+        {
+            var type = typeof(GameManager);
+            const System.Reflection.BindingFlags flags =
                 System.Reflection.BindingFlags.Public |
                 System.Reflection.BindingFlags.NonPublic |
-                System.Reflection.BindingFlags.Instance);
-
+                System.Reflection.BindingFlags.Instance;
+            var field = type.GetField("logisiticsAggregator", flags)  // original typo
+                     ?? type.GetField("logisticsAggregator", flags);   // possible fix
             return field?.GetValue(gm) as LogisticsAggregator;
         }
     }
