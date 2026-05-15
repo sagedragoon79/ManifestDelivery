@@ -472,21 +472,100 @@ namespace ManifestDelivery.Tasks
         }
 
         /// <summary>
-        /// Shared with CampHaulSearchEntry. Reflection-only because FF made
-        /// the field non-public in a recent build (and may have fixed its
-        /// typo 'logisiticsAggregator' → 'logisticsAggregator'). We try both
-        /// spellings so we work across game versions either way.
+        /// Shared with CampHaulSearchEntry. Reflection-only because the
+        /// accessor on GameManager has changed at least twice now (vanilla
+        /// 'logisiticsAggregator' field with the typo, then non-public, then
+        /// the DLC moved/renamed it again). We do a *type-based* scan:
+        /// look at every instance field and property on GameManager and
+        /// return the first one whose value is a LogisticsAggregator. The
+        /// resolved member is cached so we only walk reflection metadata once.
         /// </summary>
         internal static LogisticsAggregator? GetAggregatorPublic(GameManager gm)
         {
+            // Fast path — once resolved, just call through.
+            if (_aggregatorGetter != null)
+            {
+                try { return _aggregatorGetter(gm); }
+                catch { _aggregatorGetter = null; /* re-resolve below */ }
+            }
+            if (_aggregatorLookupAttempted && _aggregatorGetter == null)
+                return null;
+
+            _aggregatorLookupAttempted = true;
             var type = typeof(GameManager);
             const System.Reflection.BindingFlags flags =
                 System.Reflection.BindingFlags.Public |
                 System.Reflection.BindingFlags.NonPublic |
                 System.Reflection.BindingFlags.Instance;
-            var field = type.GetField("logisiticsAggregator", flags)  // original typo
-                     ?? type.GetField("logisticsAggregator", flags);   // possible fix
-            return field?.GetValue(gm) as LogisticsAggregator;
+
+            // 1) Try known field names first (fast, matches old paths).
+            foreach (var name in new[] { "logisiticsAggregator", "logisticsAggregator",
+                                         "aggregator", "Aggregator",
+                                         "logisticsAggregatorInstance" })
+            {
+                var f = type.GetField(name, flags);
+                if (f != null && typeof(LogisticsAggregator).IsAssignableFrom(f.FieldType))
+                {
+                    var ff = f;
+                    _aggregatorGetter = g => ff.GetValue(g) as LogisticsAggregator;
+                    ManifestDeliveryMod.Log.Msg($"[MD] LogisticsAggregator resolved via field GameManager.{name}");
+                    return _aggregatorGetter(gm);
+                }
+                var p = type.GetProperty(name, flags);
+                if (p != null && typeof(LogisticsAggregator).IsAssignableFrom(p.PropertyType)
+                    && p.GetGetMethod(true) != null)
+                {
+                    var pp = p;
+                    _aggregatorGetter = g => pp.GetValue(g, null) as LogisticsAggregator;
+                    ManifestDeliveryMod.Log.Msg($"[MD] LogisticsAggregator resolved via property GameManager.{name}");
+                    return _aggregatorGetter(gm);
+                }
+            }
+
+            // 2) Type-based scan — any field or property whose value is a
+            //    LogisticsAggregator. Survives further renames as long as the
+            //    type itself doesn't change.
+            foreach (var f in type.GetFields(flags))
+            {
+                if (typeof(LogisticsAggregator).IsAssignableFrom(f.FieldType))
+                {
+                    var ff = f;
+                    _aggregatorGetter = g => ff.GetValue(g) as LogisticsAggregator;
+                    ManifestDeliveryMod.Log.Msg($"[MD] LogisticsAggregator resolved by type-scan: field GameManager.{f.Name}");
+                    return _aggregatorGetter(gm);
+                }
+            }
+            foreach (var p in type.GetProperties(flags))
+            {
+                if (typeof(LogisticsAggregator).IsAssignableFrom(p.PropertyType)
+                    && p.GetGetMethod(true) != null
+                    && p.GetIndexParameters().Length == 0)
+                {
+                    var pp = p;
+                    _aggregatorGetter = g => pp.GetValue(g, null) as LogisticsAggregator;
+                    ManifestDeliveryMod.Log.Msg($"[MD] LogisticsAggregator resolved by type-scan: property GameManager.{p.Name}");
+                    return _aggregatorGetter(gm);
+                }
+            }
+
+            // 3) Last resort — look for the aggregator as a scene object.
+            //    Some game refactors detach singletons from GameManager.
+            var sceneInstance = UnityEngine.Object.FindObjectOfType<LogisticsAggregator>();
+            if (sceneInstance != null)
+            {
+                var captured = sceneInstance;
+                _aggregatorGetter = _ => captured;
+                ManifestDeliveryMod.Log.Msg($"[MD] LogisticsAggregator resolved via FindObjectOfType (scene singleton).");
+                return captured;
+            }
+
+            ManifestDeliveryMod.Log.Warning(
+                "[MD] LogisticsAggregator could not be resolved by name, type-scan, or scene lookup. " +
+                "Backhaul/CampHaul disabled until game restart resolves it.");
+            return null;
         }
+
+        private static System.Func<GameManager, LogisticsAggregator?>? _aggregatorGetter;
+        private static bool _aggregatorLookupAttempted;
     }
 }

@@ -5,6 +5,34 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.12] — 2026-05-12
+
+### Fixed
+- **DLC-compatibility for both the logistics scanner and YTD year
+  rollover.** After the DLC dropped, two of our reflection resolvers
+  stopped finding their targets:
+  - `GameManager.logisticsAggregator` was reshuffled again — the
+    1.0.11 name-based fallback couldn't find either spelling.
+    Backhaul/CampHaul logged `could not resolve LogisticsAggregator`
+    and dropped to empty scans.
+  - `TimeManager.Instance` returned null in the new build, leaving
+    stats stuck in the wrong year bucket (`YTD rollover disabled`).
+- **Fix:** both lookups now do a *type-based* scan as their last
+  resort. The LogisticsAggregator resolver walks every field and
+  property on `GameManager` and returns the first member whose value
+  is a `LogisticsAggregator`, then falls back to
+  `FindObjectOfType<LogisticsAggregator>()`. The year resolver tries
+  the standard `Instance` property/field, then
+  `UnitySingleton<TimeManager>.Instance`, then
+  `FindObjectOfType<TimeManager>`, and then scans `TimeManager` for
+  any int field/property containing "year" in its name. Both
+  resolvers cache the resolved member so they only walk metadata once.
+
+### Internal
+- Version bump `1.0.11.0` → `1.0.12.0`.
+
+---
+
 ## [1.0.11] — 2026-05-12
 
 ### Fixed

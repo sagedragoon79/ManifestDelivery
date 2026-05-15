@@ -96,9 +96,9 @@ namespace ManifestDelivery.Patches
             if (_readYear != null)
             {
                 try { return _readYear(); }
-                catch { return 0; }
+                catch { _readYear = null; /* re-resolve on next call */ }
             }
-            if (_yearLookupAttempted) return 0;
+            if (_yearLookupAttempted && _readYear == null) return 0;
             _yearLookupAttempted = true;
             try
             {
@@ -109,39 +109,45 @@ namespace ManifestDelivery.Patches
                     return 0;
                 }
 
-                var instProp = tmType.GetProperty("Instance",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                object? inst = instProp?.GetValue(null, null);
+                // Try several singleton patterns. FF/DLC may use any of these.
+                object? inst = ResolveTimeManagerInstance(tmType);
                 if (inst == null)
                 {
-                    ManifestDeliveryMod.Log.Warning("[MD][Stats] TimeManager.Instance null — YTD rollover disabled.");
+                    ManifestDeliveryMod.Log.Warning(
+                        "[MD][Stats] TimeManager located but no singleton instance found via " +
+                        "Instance/instance/UnitySingleton<>/FindObjectOfType — YTD rollover disabled.");
                     return 0;
                 }
 
-                foreach (var n in new[] { "year", "Year", "currentYear", "CurrentYear", "gameYear", "GameYear" })
+                // Try known year property/field names first.
+                foreach (var n in new[] { "year", "Year", "currentYear", "CurrentYear", "gameYear", "GameYear", "currentGameYear" })
                 {
-                    var p = tmType.GetProperty(n,
-                        System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic |
-                        System.Reflection.BindingFlags.Instance);
-                    if (p != null && p.PropertyType == typeof(int) && p.GetGetMethod(true) != null)
+                    if (TryBindYear(tmType, inst, n)) return _readYear!();
+                }
+
+                // Type-based scan — any int field/property whose name contains "year"
+                // (case-insensitive). Survives renames as long as something
+                // year-shaped exists.
+                System.Reflection.BindingFlags flags =
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Instance;
+                foreach (var p in tmType.GetProperties(flags))
+                {
+                    if (p.PropertyType == typeof(int)
+                        && p.GetGetMethod(true) != null
+                        && p.Name.IndexOf("year", StringComparison.OrdinalIgnoreCase) >= 0
+                        && p.GetIndexParameters().Length == 0)
                     {
-                        var getter = p.GetGetMethod(true);
-                        var captured = inst;
-                        _readYear = () => (int)getter.Invoke(captured, null);
-                        ManifestDeliveryMod.Log.Msg($"[MD][Stats] Year accessor: TimeManager.{n} (property)");
-                        return _readYear();
+                        if (TryBindYear(tmType, inst, p.Name)) return _readYear!();
                     }
-                    var f = tmType.GetField(n,
-                        System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic |
-                        System.Reflection.BindingFlags.Instance);
-                    if (f != null && f.FieldType == typeof(int))
+                }
+                foreach (var f in tmType.GetFields(flags))
+                {
+                    if (f.FieldType == typeof(int)
+                        && f.Name.IndexOf("year", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        var captured = inst; var captureF = f;
-                        _readYear = () => (int)captureF.GetValue(captured);
-                        ManifestDeliveryMod.Log.Msg($"[MD][Stats] Year accessor: TimeManager.{n} (field)");
-                        return _readYear();
+                        if (TryBindYear(tmType, inst, f.Name)) return _readYear!();
                     }
                 }
                 ManifestDeliveryMod.Log.Warning("[MD][Stats] No int year property/field on TimeManager — YTD rollover disabled.");
@@ -151,6 +157,78 @@ namespace ManifestDelivery.Patches
                 ManifestDeliveryMod.Log.Warning($"[MD][Stats] Year lookup failed: {ex.Message}");
             }
             return 0;
+        }
+
+        /// <summary>Try several known singleton patterns to find the TimeManager
+        /// instance. Returns null if nothing yields one.</summary>
+        private static object? ResolveTimeManagerInstance(Type tmType)
+        {
+            System.Reflection.BindingFlags staticFlags =
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static;
+
+            // 1) Standard `Instance` property/field on the type.
+            foreach (var n in new[] { "Instance", "instance" })
+            {
+                var p = tmType.GetProperty(n, staticFlags);
+                if (p != null) { var v = p.GetValue(null, null); if (v != null) return v; }
+                var f = tmType.GetField(n, staticFlags);
+                if (f != null) { var v = f.GetValue(null); if (v != null) return v; }
+            }
+
+            // 2) UnitySingleton<TimeManager>.Instance (FF's common base singleton).
+            var usType = AccessTools.TypeByName("UnitySingleton`1");
+            if (usType != null)
+            {
+                try
+                {
+                    var closed = usType.MakeGenericType(tmType);
+                    var p = closed.GetProperty("Instance", staticFlags);
+                    if (p != null) { var v = p.GetValue(null, null); if (v != null) return v; }
+                    var f = closed.GetField("Instance", staticFlags);
+                    if (f != null) { var v = f.GetValue(null); if (v != null) return v; }
+                }
+                catch { /* generic close may fail on non-Unity ancestors — fine */ }
+            }
+
+            // 3) Scene singleton — look up by type via FindObjectOfType.
+            try
+            {
+                var inst = UnityEngine.Object.FindObjectOfType(tmType);
+                if (inst != null) return inst;
+            }
+            catch { }
+
+            return null;
+        }
+
+        /// <summary>Bind _readYear to a specific property or field by name.
+        /// Returns true if bound successfully and the value can be read.</summary>
+        private static bool TryBindYear(Type tmType, object inst, string memberName)
+        {
+            System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Instance;
+            var p = tmType.GetProperty(memberName, flags);
+            if (p != null && p.PropertyType == typeof(int) && p.GetGetMethod(true) != null)
+            {
+                var getter = p.GetGetMethod(true);
+                var captured = inst;
+                _readYear = () => (int)getter.Invoke(captured, null);
+                try { _readYear(); ManifestDeliveryMod.Log.Msg($"[MD][Stats] Year accessor: TimeManager.{memberName} (property)"); return true; }
+                catch { _readYear = null; return false; }
+            }
+            var f = tmType.GetField(memberName, flags);
+            if (f != null && f.FieldType == typeof(int))
+            {
+                var captured = inst; var captureF = f;
+                _readYear = () => (int)captureF.GetValue(captured);
+                try { _readYear(); ManifestDeliveryMod.Log.Msg($"[MD][Stats] Year accessor: TimeManager.{memberName} (field)"); return true; }
+                catch { _readYear = null; return false; }
+            }
+            return false;
         }
 
         /// <summary>
