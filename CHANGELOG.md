@@ -5,6 +5,28 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.13] — 2026-05-15
+
+### Fixed
+- **YTD rollover restored** on the post-DLC build. The 1.0.12 type-based
+  scan for a `TimeManager` int year member came up empty because FF's
+  year doesn't live as a plain int on TimeManager — it's nested inside
+  the `currentDate` property, which is a `CEDateTime` struct
+  (`TimeManager.currentDate.year`). This is the same source vanilla's
+  "shipped last year" and "produced last year" stats read from.
+- **Fix:** the year resolver now binds directly to
+  `TimeManager.currentDate.year` via reflection, with fallbacks for
+  `startDate.year`, any other `CEDateTime`-typed member on TimeManager,
+  and finally the old int-on-TimeManager scan for unusual builds. The
+  resolved getter walks property → CEDateTime struct → `year` getter
+  and caches the chain, so each delivery only pays one reflection-invoke
+  pair.
+
+### Internal
+- Version bump `1.0.12.0` → `1.0.13.0`.
+
+---
+
 ## [1.0.12] — 2026-05-12
 
 ### Fixed

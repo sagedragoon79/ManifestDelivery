@@ -119,38 +119,39 @@ namespace ManifestDelivery.Patches
                     return 0;
                 }
 
-                // Try known year property/field names first.
-                foreach (var n in new[] { "year", "Year", "currentYear", "CurrentYear", "gameYear", "GameYear", "currentGameYear" })
-                {
-                    if (TryBindYear(tmType, inst, n)) return _readYear!();
-                }
+                // CANONICAL FF year source: TimeManager.currentDate.year, where
+                // currentDate is a CEDateTime struct property. This is what
+                // vanilla wagon "shipped last year" and building "produced last
+                // year" stats key off of. Bind to it directly.
+                if (TryBindDateYear(tmType, inst, "currentDate")) return _readYear!();
+                if (TryBindDateYear(tmType, inst, "startDate"))   return _readYear!();
 
-                // Type-based scan — any int field/property whose name contains "year"
-                // (case-insensitive). Survives renames as long as something
-                // year-shaped exists.
+                // Fallback: any CEDateTime-typed member on TimeManager.
                 System.Reflection.BindingFlags flags =
                     System.Reflection.BindingFlags.Public |
                     System.Reflection.BindingFlags.NonPublic |
                     System.Reflection.BindingFlags.Instance;
-                foreach (var p in tmType.GetProperties(flags))
+                var ceDateType = AccessTools.TypeByName("CEDateTime");
+                if (ceDateType != null)
                 {
-                    if (p.PropertyType == typeof(int)
-                        && p.GetGetMethod(true) != null
-                        && p.Name.IndexOf("year", StringComparison.OrdinalIgnoreCase) >= 0
-                        && p.GetIndexParameters().Length == 0)
+                    foreach (var p in tmType.GetProperties(flags))
                     {
-                        if (TryBindYear(tmType, inst, p.Name)) return _readYear!();
+                        if (p.PropertyType == ceDateType && p.GetGetMethod(true) != null && p.GetIndexParameters().Length == 0)
+                            if (TryBindDateYear(tmType, inst, p.Name)) return _readYear!();
+                    }
+                    foreach (var f in tmType.GetFields(flags))
+                    {
+                        if (f.FieldType == ceDateType)
+                            if (TryBindDateYear(tmType, inst, f.Name)) return _readYear!();
                     }
                 }
-                foreach (var f in tmType.GetFields(flags))
-                {
-                    if (f.FieldType == typeof(int)
-                        && f.Name.IndexOf("year", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        if (TryBindYear(tmType, inst, f.Name)) return _readYear!();
-                    }
-                }
-                ManifestDeliveryMod.Log.Warning("[MD][Stats] No int year property/field on TimeManager — YTD rollover disabled.");
+
+                // Last-ditch fallback (kept for unusual builds): plain int
+                // members directly on TimeManager whose name contains "year".
+                foreach (var n in new[] { "year", "Year", "currentYear", "CurrentYear", "gameYear", "GameYear" })
+                    if (TryBindYear(tmType, inst, n)) return _readYear!();
+
+                ManifestDeliveryMod.Log.Warning("[MD][Stats] No year accessor found on TimeManager (tried currentDate.year, CEDateTime scan, int scan) — YTD rollover disabled.");
             }
             catch (Exception ex)
             {
@@ -201,6 +202,74 @@ namespace ManifestDelivery.Patches
             catch { }
 
             return null;
+        }
+
+        /// <summary>Bind _readYear to TimeManager.<memberName>.year, where the
+        /// named member is a CEDateTime struct (currentDate / startDate / etc.).
+        /// This is FF's canonical year source — vanilla per-year stats read
+        /// from currentDate.year.</summary>
+        private static bool TryBindDateYear(Type tmType, object inst, string memberName)
+        {
+            System.Reflection.BindingFlags flags =
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Instance;
+
+            // Resolve the CEDateTime container (property or field) on TimeManager.
+            Func<object?>? readDate = null;
+            var p = tmType.GetProperty(memberName, flags);
+            if (p != null && p.GetGetMethod(true) != null && p.GetIndexParameters().Length == 0)
+            {
+                var getter = p.GetGetMethod(true);
+                var captured = inst;
+                readDate = () => getter.Invoke(captured, null);
+            }
+            else
+            {
+                var f = tmType.GetField(memberName, flags);
+                if (f != null)
+                {
+                    var captured = inst; var captureF = f;
+                    readDate = () => captureF.GetValue(captured);
+                }
+            }
+            if (readDate == null) return false;
+
+            // Probe a sample date so we can find CEDateTime.year on its actual type.
+            object? sample;
+            try { sample = readDate(); }
+            catch { return false; }
+            if (sample == null) return false;
+
+            var dateType = sample.GetType();
+            var yearProp = dateType.GetProperty("year", flags);
+            if (yearProp != null && yearProp.PropertyType == typeof(int) && yearProp.GetGetMethod(true) != null)
+            {
+                var yearGetter = yearProp.GetGetMethod(true);
+                var captureRead = readDate;
+                _readYear = () =>
+                {
+                    var d = captureRead();
+                    if (d == null) return 0;
+                    return (int)yearGetter.Invoke(d, null);
+                };
+                try { _readYear(); ManifestDeliveryMod.Log.Msg($"[MD][Stats] Year accessor: TimeManager.{memberName}.year (CEDateTime property)"); return true; }
+                catch { _readYear = null; return false; }
+            }
+            var yearField = dateType.GetField("_year", flags) ?? dateType.GetField("year", flags);
+            if (yearField != null && yearField.FieldType == typeof(int))
+            {
+                var captureRead = readDate; var captureYf = yearField;
+                _readYear = () =>
+                {
+                    var d = captureRead();
+                    if (d == null) return 0;
+                    return (int)captureYf.GetValue(d);
+                };
+                try { _readYear(); ManifestDeliveryMod.Log.Msg($"[MD][Stats] Year accessor: TimeManager.{memberName}.{yearField.Name} (CEDateTime field)"); return true; }
+                catch { _readYear = null; return false; }
+            }
+            return false;
         }
 
         /// <summary>Bind _readYear to a specific property or field by name.

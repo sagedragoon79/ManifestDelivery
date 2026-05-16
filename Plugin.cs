@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.12", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.13", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -196,7 +196,7 @@ namespace ManifestDelivery
             // mod init would use an empty save-name, and the file would leak across
             // different save games — this sidesteps both.
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.12 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.13 loaded.");
 
             // Optional: register with Keep Clarity's settings panel if installed.
             KeepClarityIntegration.TryRegisterAll();
