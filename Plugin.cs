@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.13", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.14", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -29,6 +29,7 @@ namespace ManifestDelivery
 
         // ── Camp stockyard ────────────────────────────────────────────────────
         public static MelonPreferences_Entry<bool>  CampHaulEnabled { get; private set; } = null!;
+        public static MelonPreferences_Entry<bool>  HubHaulEnabled  { get; private set; } = null!;
         public static MelonPreferences_Entry<float> CampWorkRadius  { get; private set; } = null!;
         public static MelonPreferences_Entry<float> HubWorkRadius   { get; private set; } = null!;
 
@@ -116,6 +117,15 @@ namespace ManifestDelivery
                 description:  "When true, Camp-mode wagons proactively haul goods from " +
                               "nearby production buildings to hub storage.");
 
+            HubHaulEnabled = cat.CreateEntry(
+                "HubHaulEnabled", true,
+                display_name: "Hub Haul Enabled",
+                description:  "When true, Hub-mode wagons proactively distribute goods to " +
+                              "ANY building with an active request within the Hub work radius " +
+                              "(markets, shelters/residences, producers, storages). Without " +
+                              "this, Hub wagons only do opportunistic backhaul after a vanilla-" +
+                              "assigned delivery. Default true.");
+
             CampWorkRadius = cat.CreateEntry(
                 "CampWorkRadius", 120f,
                 display_name: "Camp Work Radius",
@@ -196,7 +206,7 @@ namespace ManifestDelivery
             // mod init would use an empty save-name, and the file would leak across
             // different save games — this sidesteps both.
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.13 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.14 loaded.");
 
             // Optional: register with Keep Clarity's settings panel if installed.
             KeepClarityIntegration.TryRegisterAll();

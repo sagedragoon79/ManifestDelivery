@@ -102,6 +102,48 @@ namespace ManifestDelivery.Components
             CampHaulRequester = null;
         }
 
+        // ── Hub haul state ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Cooldown: next Time.time when a hub haul scan is allowed.
+        /// Mirrors NextCampHaulScanTime but for Hub-mode distribution.
+        /// </summary>
+        public float NextHubHaulScanTime { get; set; }
+
+        /// <summary>
+        /// True when the previous HubHaul scan found no eligible requester.
+        /// Throttles the "HubHaul EMPTY" log line to state transitions only.
+        /// </summary>
+        public bool LastHubHaulScanWasEmpty { get; set; }
+
+        /// <summary>
+        /// The requester assigned during a hub haul search.
+        /// Stored for cleanup if the wagon parks without executing.
+        /// </summary>
+        public LogisticsRequester? HubHaulRequester { get; set; }
+
+        /// <summary>
+        /// Cleans up a hub haul assignment if one is pending.
+        /// </summary>
+        public void ClearHubHaulAssignment(TransportWagon wagon)
+        {
+            if (HubHaulRequester == null) return;
+
+            try
+            {
+                HubHaulRequester.UnassignWorker(
+                    wagon,
+                    LogisticsAssignment.AssignmentCategory.Default);
+            }
+            catch (System.Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD] ClearHubHaulAssignment failed for {wagon?.name}: {ex.Message}");
+            }
+
+            HubHaulRequester = null;
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────
 
         /// <summary>

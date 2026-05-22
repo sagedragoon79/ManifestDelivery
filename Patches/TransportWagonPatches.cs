@@ -93,6 +93,14 @@ namespace ManifestDelivery.Patches
             gm.defaultTaskManager.AddTaskSearchEntry(
                 __instance,
                 new CampHaulSearchEntry(__instance, data));
+
+            // Hub haul: priority 1, fires after CampHaul(2) but before LogisticsProxy(0).
+            // The proactive Hub distributor — serves any delivery/move-out
+            // request within the Hub radius (markets, shelters, producers,
+            // storages) instead of waiting on opportunistic backhaul.
+            gm.defaultTaskManager.AddTaskSearchEntry(
+                __instance,
+                new HubHaulSearchEntry(__instance, data));
         }
 
         // ── 3. Flag delivery completion ───────────────────────────────────────
@@ -196,6 +204,15 @@ namespace ManifestDelivery.Patches
                     $"{wagon.name}, parking and releasing camp haul assignment.");
             }
 
+            // Clean up hub haul assignment too
+            if (data.HubHaulRequester != null)
+            {
+                data.ClearHubHaulAssignment(wagon);
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] HubHaul: no logistics work found for " +
+                    $"{wagon.name}, parking and releasing hub haul assignment.");
+            }
+
             // Also ensure JustDelivered is cleared in case the ReturnTrip entry
             // somehow didn't fire (e.g. game loaded mid-task).
             data.JustDelivered = false;
@@ -241,6 +258,15 @@ namespace ManifestDelivery.Patches
                     $"[MD] CampHaul: {wagon.name} started logistics task via " +
                     $"camp haul to {data.CampHaulRequester.gameObject.name}.");
                 data.CampHaulRequester = null;
+            }
+
+            // Clear hub haul assignment once task actually starts
+            if (data.HubHaulRequester != null)
+            {
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] HubHaul: {wagon.name} started logistics task via " +
+                    $"hub haul to {data.HubHaulRequester.gameObject.name}.");
+                data.HubHaulRequester = null;
             }
         }
 

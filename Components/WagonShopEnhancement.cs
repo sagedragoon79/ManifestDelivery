@@ -279,6 +279,13 @@ namespace ManifestDelivery.Components
         public bool IsCampHaulActive =>
             Mode == ShopMode.Camp && ManifestDeliveryMod.CampHaulEnabled.Value;
 
+        /// <summary>
+        /// Returns true when this shop is in Hub mode and hub hauling is enabled.
+        /// Drives the proactive Hub distributor (HubHaulSearchEntry).
+        /// </summary>
+        public bool IsHubHaulActive =>
+            Mode == ShopMode.Hub && ManifestDeliveryMod.HubHaulEnabled.Value;
+
         // ── Camp zone helpers ─────────────────────────────────────────────────
 
         /// <summary>

@@ -5,6 +5,37 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.14] — 2026-05-21
+
+### Added
+- **Proactive Hub distribution (`HubHaulSearchEntry`).** Hub-mode wagons now
+  set out on their own to serve any building with an active request inside the
+  Hub work radius — markets, shelters/residences, producers, and storages, no
+  building-type filtering. Previously Hub mode only did *opportunistic
+  backhaul* (`ReturnTrip`, gated on `JustDelivered`), so a Hub wagon never
+  distributed unless vanilla logistics handed it a first job; idle Hub wagons
+  just parked. The new entry scans on a 1.5 s cooldown, claims the nearest
+  eligible requester, and lets the game's `LogisticsProxy` build the real haul.
+  - Mirrors `CampHaulSearchEntry`'s structure but is cooldown-gated rather than
+    `JustDelivered`-gated, and serves both delivery **and** move-out requests.
+  - Slots into the priority chain at 1:
+    `KickOut(10) → ReturnTrip(3) → CampHaul(2) → HubHaul(1) → LogisticsProxy(0)`.
+    Camp-only and Hub-only entries never run on the same wagon.
+- **`HubHaulEnabled` toggle** (default `true`). Set false to revert Hub mode to
+  backhaul-only behaviour.
+
+### Internal
+- New `Tasks/HubHaulSearchEntry.cs`; `IsHubHaulActive` on `WagonShopEnhancement`;
+  `NextHubHaulScanTime` / `LastHubHaulScanWasEmpty` / `HubHaulRequester` +
+  `ClearHubHaulAssignment` on `WagonEnhancementData`; registration and
+  park/start cleanup hooks in `Patches/TransportWagonPatches.cs`.
+- Verified via live log + decompile that `MarketBuilding : StorageBuilding`,
+  `Shelter : Residence`, and producers all emit wagon-fulfillable requests
+  through `LogisticsRequester.activeDeliveryRequests` / `activeMoveOutRequests`.
+- Version bump `1.0.13.0` → `1.0.14.0`.
+
+---
+
 ## [1.0.13] — 2026-05-15
 
 ### Fixed
