@@ -5,6 +5,24 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.15] — 2026-05-23
+
+### Changed
+- **Per-event logging is now opt-in.** The high-frequency diagnostic lines
+  (`DELIVER`, `ReturnTrip CLAIM`/`EMPTY`, `Backhaul tier`, `CampHaul CLAIM`/
+  `EMPTY`, `HubHaul CLAIM`/`EMPTY`, the task start/park release lines, and the
+  wagon back-link line) fired many times per second on a busy map and flooded
+  the MelonLoader log. They now route through a new `LogVerbose` helper that
+  only emits when the **`VerboseLogging`** preference is enabled.
+- **`VerboseLogging` toggle** (default `false`). Flip it on when diagnosing
+  wagon routing, off for normal play. Warnings, errors, and one-time events
+  (mode changes, stats save, init, button re-enable) always log regardless.
+
+### Internal
+- Version bump `1.0.14.0` → `1.0.15.0`.
+
+---
+
 ## [1.0.14] — 2026-05-21
 
 ### Added

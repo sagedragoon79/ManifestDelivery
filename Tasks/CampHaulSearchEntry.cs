@@ -111,7 +111,7 @@ namespace ManifestDelivery.Tasks
                 if (!_data.LastCampHaulScanWasEmpty)
                 {
                     _data.LastCampHaulScanWasEmpty = true;
-                    ManifestDeliveryMod.Log.Msg(
+                    ManifestDeliveryMod.LogVerbose(
                         $"[MD] CampHaul EMPTY: {_wagon.name} " +
                         $"— no camp sources in {diagRadius:F0}u around shop at " +
                         $"({diagShopPos.x:F0},{diagShopPos.z:F0})");
@@ -133,7 +133,7 @@ namespace ManifestDelivery.Tasks
                 string items = DescribeMoveOut(bestSource);
                 float distFromShop = Vector3.Distance(
                     diagShopPos, bestSource.transform.position);
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] CampHaul CLAIM: {_wagon.name} → " +
                     $"{bestSource.gameObject.name} " +
                     $"[{items}] " +

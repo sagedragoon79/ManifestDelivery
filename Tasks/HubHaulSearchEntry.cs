@@ -97,7 +97,7 @@ namespace ManifestDelivery.Tasks
                 if (!_data.LastHubHaulScanWasEmpty)
                 {
                     _data.LastHubHaulScanWasEmpty = true;
-                    ManifestDeliveryMod.Log.Msg(
+                    ManifestDeliveryMod.LogVerbose(
                         $"[MD] HubHaul EMPTY: {_wagon.name} " +
                         $"— no requests in {diagRadius:F0}u around hub at " +
                         $"({diagShopPos.x:F0},{diagShopPos.z:F0})");
@@ -118,7 +118,7 @@ namespace ManifestDelivery.Tasks
 
                 string items = DescribeRequests(best);
                 float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] HubHaul CLAIM: {_wagon.name} → " +
                     $"{best.gameObject.name} " +
                     $"[{items}] " +

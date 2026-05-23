@@ -124,7 +124,7 @@ namespace ManifestDelivery.Tasks
             {
                 // Log the empty-scan so we can see WHEN backhaul tried but found
                 // nothing. One line per drop-off, not per frame — cost is fine.
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] ReturnTrip EMPTY ({diagMode}): {_wagon.name} " +
                     $"— no candidates in {diagRadius:F0}u around " +
                     $"{(diagShopAnchored ? "shop" : "wagon")} at " +
@@ -152,7 +152,7 @@ namespace ManifestDelivery.Tasks
                 string shopDistStr = distFromShop >= 0f
                     ? $", {distFromShop:F0}u from shop"
                     : "";
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] ReturnTrip CLAIM ({diagMode}): {_wagon.name} → " +
                     $"{best.gameObject.name} " +
                     $"[{items}] " +
@@ -291,7 +291,7 @@ namespace ManifestDelivery.Tasks
             // Otherwise fall through to overall closest (storage, etc.).
             if (preferWorkshop && bestWorkshop != null)
             {
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] Backhaul tier: workshop-priority chose {bestWorkshop.gameObject.name} " +
                     $"(closest-overall would have been {bestRequester?.gameObject.name ?? "null"})");
                 return bestWorkshop;

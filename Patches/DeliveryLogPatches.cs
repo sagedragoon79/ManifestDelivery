@@ -54,7 +54,7 @@ namespace ManifestDelivery.Patches
                 string dest = DescribeContainer(dropOffStorage);
                 string origin = DescribeStorage(originStorage);
 
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] DELIVER ({mode}): {__instance.name} " +
                     $"{bundle.name}×{bundle.numberOfItems} " +
                     $"{origin} → {dest}");

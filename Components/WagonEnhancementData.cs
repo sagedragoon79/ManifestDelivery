@@ -52,7 +52,7 @@ namespace ManifestDelivery.Components
 
             ShopEnhancement = wagon.wagonShop.GetComponent<WagonShopEnhancement>();
             if (ShopEnhancement != null)
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] Back-linked {wagon.name} → " +
                     $"{wagon.wagonShop.gameObject.name} ({ShopEnhancement.Mode})");
             return ShopEnhancement;

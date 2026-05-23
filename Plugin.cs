@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.14", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.15", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -50,8 +50,22 @@ namespace ManifestDelivery
         private static KeyCode _modeCycleKey = KeyCode.M;
         public static KeyCode ModeCycleKey => _modeCycleKey;
 
+        // ── Verbose logging toggle ────────────────────────────────────────────
+        public static MelonPreferences_Entry<bool> VerboseLogging { get; private set; } = null!;
+
         // ── Logger shortcut used throughout the mod ───────────────────────────
         public static MelonLogger.Instance Log => Instance.LoggerInstance;
+
+        /// <summary>
+        /// Per-event diagnostic logging (DELIVER / CLAIM / EMPTY / start / park).
+        /// Suppressed unless VerboseLogging is enabled — these fire many times
+        /// per second on a busy map. Warnings and errors always log via Log.*.
+        /// </summary>
+        public static void LogVerbose(string message)
+        {
+            if (VerboseLogging != null && VerboseLogging.Value)
+                Instance.LoggerInstance.Msg(message);
+        }
 
         public override void OnInitializeMelon()
         {
@@ -69,6 +83,15 @@ namespace ManifestDelivery
                 LoggerInstance.Msg("Manifest Delivery is DISABLED via config.");
                 return;
             }
+
+            VerboseLogging = cat.CreateEntry(
+                "VerboseLogging", false,
+                display_name: "Verbose Logging",
+                description:  "When true, logs every per-delivery and per-scan event " +
+                              "(DELIVER / ReturnTrip / CampHaul / HubHaul CLAIM + EMPTY lines) " +
+                              "to the MelonLoader log. Useful for diagnosing wagon routing, " +
+                              "but noisy on a busy map. Warnings and errors always log " +
+                              "regardless. Default false.");
 
             // ── Return-trip settings ─────────────────────────────────────────
             ReturnTripEnabled = cat.CreateEntry(
@@ -206,7 +229,7 @@ namespace ManifestDelivery
             // mod init would use an empty save-name, and the file would leak across
             // different save games — this sidesteps both.
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.14 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.15 loaded.");
 
             // Optional: register with Keep Clarity's settings panel if installed.
             KeepClarityIntegration.TryRegisterAll();

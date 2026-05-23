@@ -72,7 +72,7 @@ namespace ManifestDelivery.Patches
                 data.ShopEnhancement =
                     __instance.wagonShop.GetComponent<WagonShopEnhancement>();
                 if (data.ShopEnhancement != null)
-                    ManifestDeliveryMod.Log.Msg(
+                    ManifestDeliveryMod.LogVerbose(
                         $"[MD] Back-linked {__instance.name} → " +
                         $"{__instance.wagonShop.gameObject.name} " +
                         $"({data.ShopEnhancement.Mode})");
@@ -190,7 +190,7 @@ namespace ManifestDelivery.Patches
             if (data.TemporaryRequester != null)
             {
                 data.ClearTemporaryAssignment(wagon);
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] ReturnTrip: no logistics work found near drop-off for " +
                     $"{wagon.name}, parking and releasing temp assignment.");
             }
@@ -199,7 +199,7 @@ namespace ManifestDelivery.Patches
             if (data.CampHaulRequester != null)
             {
                 data.ClearCampHaulAssignment(wagon);
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] CampHaul: no logistics work found for " +
                     $"{wagon.name}, parking and releasing camp haul assignment.");
             }
@@ -208,7 +208,7 @@ namespace ManifestDelivery.Patches
             if (data.HubHaulRequester != null)
             {
                 data.ClearHubHaulAssignment(wagon);
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] HubHaul: no logistics work found for " +
                     $"{wagon.name}, parking and releasing hub haul assignment.");
             }
@@ -245,7 +245,7 @@ namespace ManifestDelivery.Patches
             // assignment; clear the reference (but keep the assignment itself).
             if (data.TemporaryRequester != null)
             {
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] ReturnTrip: {wagon.name} started logistics task via " +
                     $"backhaul to {data.TemporaryRequester.gameObject.name}.");
                 data.TemporaryRequester = null;
@@ -254,7 +254,7 @@ namespace ManifestDelivery.Patches
             // Clear camp haul assignment once task actually starts
             if (data.CampHaulRequester != null)
             {
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] CampHaul: {wagon.name} started logistics task via " +
                     $"camp haul to {data.CampHaulRequester.gameObject.name}.");
                 data.CampHaulRequester = null;
@@ -263,7 +263,7 @@ namespace ManifestDelivery.Patches
             // Clear hub haul assignment once task actually starts
             if (data.HubHaulRequester != null)
             {
-                ManifestDeliveryMod.Log.Msg(
+                ManifestDeliveryMod.LogVerbose(
                     $"[MD] HubHaul: {wagon.name} started logistics task via " +
                     $"hub haul to {data.HubHaulRequester.gameObject.name}.");
                 data.HubHaulRequester = null;
