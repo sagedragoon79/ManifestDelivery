@@ -5,6 +5,35 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.16] — 2026-05-24
+
+### Fixed
+- **Wagon Shop modes reverting to Standard on save load.** The per-save modes
+  file is keyed on `SaveManager.activeSaveFileName`, but that field is a mutable
+  static the game nulls out during save/scene transitions and recomputes
+  lazily. Querying it at the wrong moment — including mid-game when the player
+  changed a shop's mode — returned `""`, so the mode got *written* to
+  `default.txt` while reload *read* from the real `<save>.txt`. No match →
+  every shop came back Standard.
+  - Logs showed the smoking gun: `No modes file for save 'Freeman_…/Freeman'`
+    on load vs `Loaded 1 shop mode(s) for save ''` (key=399332 Camp) — the same
+    map resolving to two different save names within one session.
+- **Fix:** `GetActiveSaveName` now latches the last non-empty save name and only
+  switches when a *different* non-empty name appears (a real save-switch),
+  never when the field transiently goes empty. Reads and writes stay on the
+  same file. The same fix covers per-shop hauling stats, which resolve the
+  save name through the same method.
+
+### Note
+- Modes set under the old bug live in `UserData/ManifestDelivery_Modes/default.txt`
+  and won't auto-migrate to the correct save file. Re-set each shop's mode once
+  after updating; from then on it persists correctly.
+
+### Internal
+- Version bump `1.0.15.0` → `1.0.16.0`.
+
+---
+
 ## [1.0.15] — 2026-05-23
 
 ### Changed

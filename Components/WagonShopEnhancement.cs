@@ -75,10 +75,31 @@ namespace ManifestDelivery.Components
                 $"{safe}.txt");
         }
 
+        // Last non-empty save name we observed. SaveManager.activeSaveFileName
+        // is a mutable static the game nulls out during save/scene transitions
+        // and recomputes lazily — querying it at the wrong moment (including
+        // mid-game when the player changes a shop mode) returns "", which used
+        // to send writes to default.txt and reads to the real <save>.txt,
+        // silently reverting modes on reload. We latch the last good value and
+        // only switch when a *different* non-empty name appears (real
+        // save-switch), never when it transiently goes empty.
+        private static string _lastKnownSaveName = "";
+
         private static string GetActiveSaveName()
         {
-            try { return SaveManager.activeSaveFileName ?? ""; }
-            catch { return ""; }
+            string live;
+            try { live = SaveManager.activeSaveFileName ?? ""; }
+            catch { live = ""; }
+
+            if (!string.IsNullOrEmpty(live))
+            {
+                _lastKnownSaveName = live;
+                return live;
+            }
+
+            // Transient empty — fall back to the last good name so reads and
+            // writes stay on the same file.
+            return _lastKnownSaveName;
         }
 
         /// <summary>
