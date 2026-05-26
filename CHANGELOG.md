@@ -5,6 +5,28 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.17] — 2026-05-26
+
+### Fixed
+- **Hub worker slots auto-unfilling after reload.** A reloaded Hub shop showed
+  the correct "Hub" mode and 4 slots, but 2 sat empty and re-emptied the moment
+  you tried to fill them. `maxWorkers` is an auto-property on `Resource` that
+  the game rewrites from save data and building/tier data *after* our mode
+  restore raised it to the Hub cap of 4 — dropping the hard cap back to the
+  vanilla 2. `userDefinedMaxWorkers`' setter then clamps to it
+  (`Mathf.Min(maxWorkers, value)`), so the extra workers were rejected. Toggling
+  the mode by hand fixed it only because that ran long after load settled.
+- **Fix:** patch the `Resource.get_maxWorkers` getter so a Hub-mode `WagonShop`
+  always *reports* its mode cap (4). Computed on every read, it can't be
+  clobbered by late save/building-data writes. Standard and Camp shops (cap 2 =
+  vanilla) and all non-WagonShop resources fall through untouched.
+
+### Internal
+- New `maxWorkers_Getter_Postfix` in `Patches/WagonShopPatches.cs`.
+- Version bump `1.0.16.0` → `1.0.17.0`.
+
+---
+
 ## [1.0.16] — 2026-05-24
 
 ### Fixed

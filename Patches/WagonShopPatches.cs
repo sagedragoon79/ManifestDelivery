@@ -42,6 +42,33 @@ namespace ManifestDelivery.Patches
         private static GameObject _previewCamp = null;
         private static PlaceableBuilding _trackedPlaceable = null;
 
+        // ── Hub worker-slot cap (clobber-proof) ───────────────────────────────
+        //
+        //  maxWorkers is a `public int maxWorkers { get; protected set; }` auto-
+        //  property on Resource (WagonShop : EnterableBuilding : Building :
+        //  Resource). The game writes it from save data (Resource.Load) and from
+        //  building/tier data during load — AFTER our mode restore raises it to
+        //  the Hub cap of 4. The result: the hard cap silently drops back to the
+        //  vanilla 2, and userDefinedMaxWorkers' setter clamps to it
+        //  (`Mathf.Min(maxWorkers, value)`), so 2 of the 4 Hub slots auto-unfill.
+        //
+        //  Rather than fight the write timing, we patch the GETTER so a Hub-mode
+        //  WagonShop always *reports* its mode cap. Computed on every read, it
+        //  can't be clobbered. Only Hub shops are touched — Standard/Camp (cap 2)
+        //  fall through to vanilla untouched, and non-WagonShop resources bail on
+        //  a cheap type check.
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(Resource), "get_maxWorkers")]
+        private static void maxWorkers_Getter_Postfix(Resource __instance, ref int __result)
+        {
+            if (__instance is not WagonShop) return;
+
+            var enh = __instance.GetComponent<WagonShopEnhancement>();
+            if (enh != null && enh.Mode == ShopMode.Hub)
+                __result = enh.MaxWagons;   // Hub cap (4 by default)
+        }
+
         [HarmonyPostfix]
         [HarmonyPatch(typeof(PlaceableBuilding), "SetMeshFromPrefab")]
         private static void SetMeshFromPrefab_Postfix(PlaceableBuilding __instance, GameObject prefab)
