@@ -85,6 +85,26 @@ namespace ManifestDelivery.Components
         // save-switch), never when it transiently goes empty.
         private static string _lastKnownSaveName = "";
 
+        /// <summary>
+        /// Latch the authoritative save name the instant a load begins. Called
+        /// from Harmony patches on the game's load entry points
+        /// (CESceneManager.LoadFromWithinGame / StartSceneManager.StartGame),
+        /// which set SaveManager.activeSaveFileName themselves. This closes the
+        /// race where our shop Start/Finalize code could query the volatile
+        /// activeSaveFileName static before the game populated it — reading or
+        /// writing default.txt instead of the real per-save file. Ignores empty
+        /// values so a transient clear never overwrites a good name.
+        /// </summary>
+        public static void LatchSaveName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return;
+            if (_lastKnownSaveName != name)
+            {
+                _lastKnownSaveName = name;
+                ManifestDeliveryMod.Log.Msg($"[MD] Save name latched: '{name}'");
+            }
+        }
+
         private static string GetActiveSaveName()
         {
             string live;

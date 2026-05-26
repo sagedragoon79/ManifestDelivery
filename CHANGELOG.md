@@ -5,6 +5,27 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.18] — 2026-05-26
+
+### Fixed
+- **Closed the last save-name race in mode persistence.** v1.0.16 latched the
+  last non-empty `SaveManager.activeSaveFileName`, but on the very first load of
+  a session our shop code could still query that static *before* the game
+  populated it — briefly reading/writing `default.txt` instead of the real
+  per-save file (seen as `Loaded N shop mode(s) for save ''` at the main menu).
+- **Fix:** new `SaveNameLatchPatches` postfix the two methods where the game
+  itself assigns the canonical name — `CESceneManager.LoadFromWithinGame`
+  (in-game save switch) and `StartSceneManager.StartGame` (main-menu load,
+  via `metaData.fileNameNoExtension`). Both fire before the Frontier scene's
+  buildings run, so the per-save modes/stats files are always keyed to the
+  correct save with no empty-name window.
+
+### Internal
+- New `Patches/SaveNameLatchPatches.cs`; `WagonShopEnhancement.LatchSaveName`.
+- Version bump `1.0.17.0` → `1.0.18.0`.
+
+---
+
 ## [1.0.17] — 2026-05-26
 
 ### Fixed
