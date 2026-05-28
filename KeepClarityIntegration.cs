@@ -63,7 +63,8 @@ namespace ManifestDelivery
 
         private static object NewMeta(string? label = null, string? tooltip = null,
             object? min = null, object? max = null, string? group = null,
-            bool restartRequired = false, int order = 0, Func<bool>? visibleWhen = null)
+            bool restartRequired = false, bool reloadRequired = false,
+            int order = 0, Func<bool>? visibleWhen = null)
         {
             var m = Activator.CreateInstance(_settingsMetaType!);
             void Set(string field, object? value)
@@ -77,6 +78,7 @@ namespace ManifestDelivery
             Set("Max", max);
             Set("Group", group);
             Set("RestartRequired", restartRequired);
+            Set("ReloadRequired", reloadRequired);
             Set("Order", order);
             Set("VisibleWhen", visibleWhen);
             return m!;
@@ -95,13 +97,17 @@ namespace ManifestDelivery
                 NewMeta("Mod Enabled", "Disable to fall back to vanilla Wagon Shop behavior", restartRequired: true));
 
             // === Wagon Caps ===
+            // reloadRequired: the worker-slot count is provisioned in
+            // WagonShopEnhancement.UpdateWorkerSlots, which runs on map load and
+            // on mode change — not re-evaluated live. (The wagon-production
+            // ceiling is read live, but the visible slot count bakes on load.)
             Reg("Wagon Caps", ManifestDeliveryMod.MaxWagonsStandard,
-                NewMeta("Max Wagons — Standard", min: 1, max: 4));
+                NewMeta("Max Wagons — Standard", min: 1, max: 4, reloadRequired: true));
             Reg("Wagon Caps", ManifestDeliveryMod.MaxWagonsCamp,
-                NewMeta("Max Wagons — Camp", min: 1, max: 4,
+                NewMeta("Max Wagons — Camp", min: 1, max: 4, reloadRequired: true,
                     tooltip: "2 recommended: one hauls output, one returns supplies"));
             Reg("Wagon Caps", ManifestDeliveryMod.MaxWagonsHub,
-                NewMeta("Max Wagons — Hub", min: 1, max: 6,
+                NewMeta("Max Wagons — Hub", min: 1, max: 6, reloadRequired: true,
                     tooltip: "Hub shops serve the whole settlement"));
 
             // === Return-trip / backhaul ===
@@ -117,9 +123,14 @@ namespace ManifestDelivery
                     visibleWhen: () => ManifestDeliveryMod.ReturnTripEnabled.Value));
 
             // === Camp / Hub ===
+            // All live: the gating flags (IsCampHaulActive / IsHubHaulActive)
+            // and the work radii are re-read on every CampHaul/HubHaul scan.
             Reg("Camp & Hub", ManifestDeliveryMod.CampHaulEnabled,
                 NewMeta("Camp Proactive Haul",
                     "Camp wagons proactively haul from nearby production to hub storage"));
+            Reg("Camp & Hub", ManifestDeliveryMod.HubHaulEnabled,
+                NewMeta("Hub Proactive Distribution",
+                    "Hub wagons proactively serve any request in radius (markets, shelters, producers, storage)"));
             Reg("Camp & Hub", ManifestDeliveryMod.CampWorkRadius,
                 NewMeta("Camp Work Radius", min: 50f, max: 250f,
                     tooltip: "Default 120u covers a typical remote camp"));
@@ -128,16 +139,22 @@ namespace ManifestDelivery
                     tooltip: "Default 200u covers a full town center"));
 
             // === Storage Cart ===
+            // Capacity is baked in SupplyWagon.Start (read once when the cart
+            // spins up), so a change applies on reload / to newly-built carts.
             Reg("Storage Cart", ManifestDeliveryMod.StorageCartCapacity,
-                NewMeta("Capacity", min: 100, max: 5000, tooltip: "Vanilla 750"));
+                NewMeta("Capacity", min: 100, max: 5000, reloadRequired: true,
+                    tooltip: "Vanilla 750"));
+            // Speed mult is read live in get_movementSpeed — applies immediately.
             Reg("Storage Cart", ManifestDeliveryMod.StorageCartSpeedMult,
                 NewMeta("Relocation Speed Multiplier", min: 0.5f, max: 5.0f,
                     tooltip: "How fast the cart 'drives' itself to a rally point"));
 
             // === Hotkeys ===
+            // restartRequired: the key string is parsed into _modeCycleKey once
+            // in OnInitializeMelon; the resolved KeyCode is what's read live.
             Reg("Hotkeys", ManifestDeliveryMod.ModeCycleKeyName,
-                NewMeta("Cycle Wagon Shop Mode",
-                    "Unity KeyCode name. Cycles Standard / Camp / Hub while a Wagon Shop is selected."));
+                NewMeta("Cycle Wagon Shop Mode", restartRequired: true,
+                    tooltip: "Unity KeyCode name. Cycles Standard / Camp / Hub while a Wagon Shop is selected."));
         }
     }
 }

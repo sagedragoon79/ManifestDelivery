@@ -5,6 +5,31 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.19] — 2026-05-26
+
+### Changed
+- **Audited Keep Clarity per-setting reload/restart flags** so the mod-manager's
+  live "!" indicator reflects how each setting actually applies:
+  - **Wagon caps (Standard / Camp / Hub) → reloadRequired.** The worker-slot
+    count is provisioned in `UpdateWorkerSlots` on map load / mode change, not
+    re-evaluated live.
+  - **Storage Cart Capacity → reloadRequired.** Baked in `SupplyWagon.Start`;
+    applies to carts built after the change or on reload.
+  - **Mode Cycle Key → restartRequired.** The key string is parsed into a
+    `KeyCode` once in `OnInitializeMelon`.
+  - Backhaul AI (enable/radius/prefer-workshops), Camp/Hub haul toggles, work
+    radii, and Storage Cart speed remain **live** — each is re-read every scan
+    or on every property access.
+- **Registered the missing `HubHaulEnabled` toggle** ("Hub Proactive
+  Distribution", live) in the Camp & Hub group — sibling of Camp Proactive Haul.
+- `NewMeta` now supports a `reloadRequired` argument (maps to KC's
+  `SettingsMeta.ReloadRequired`).
+
+### Internal
+- Version bump `1.0.18.0` → `1.0.19.0`.
+
+---
+
 ## [1.0.18] — 2026-05-26
 
 ### Fixed
