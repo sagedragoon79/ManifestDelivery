@@ -5,6 +5,48 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.20] — 2026-06-19
+
+### Added
+- **Hub multi-source pickup** (`HubMultiSourcePickup`, experimental, default off).
+  Hub-mode wagons now claim only **Deliver** (restock) requests — and claim the
+  *specific* delivery request rather than the whole building — so the haul routes
+  through the game's multi-source path (`FindBestRouteDeliver`). One wagon fans
+  across several source storages up to carry capacity before delivering, instead
+  of one near-empty pickup per trip (markets/forges/residences restocking from
+  multiple storehouses in a single trip).
+  - **Why claim the specific request:** the requester-level `AssignWorker` claims
+    a building *wholesale* (its TakeOut requests too), which reintroduces
+    single-source hauls. The per-request `LogisticsRequest.AssignWorker` claims
+    exactly the Deliver request, guaranteeing Deliver-shaped routing.
+  - **Herd guard:** all Hub wagons share the scan cooldown, so without a guard
+    they all claim the same nearest request in one burst. MD now tracks its own
+    Hub claims and skips a request already covered by enough wagons for its
+    remaining unreserved deficit (`ceil(unreserved / 100)`), spreading the fleet
+    across distinct requesters. Validated in-game: a 12-wagon dogpile on one
+    forge collapsed to spread across 166 distinct requesters, max 4 on a single
+    high-deficit market (justified, not a dogpile).
+- **Haul Diagnostics** (`HaulDiagnostics`, default off). One-shot dump of every
+  wagon haul as it's built — pickup/dropoff stops, items + counts, source/dest
+  names, served-request throttle params, and carry capacity — for diagnosing
+  wagon routing and load efficiency. Near-zero cost when off.
+
+### Notes
+- **Camp multi-source was investigated and deliberately not shipped.** FF's
+  logistics solver commits one single-source route per worker and only fans
+  sources for Deliver requests anchored at the drop-off, so Camp's
+  remote-producers→central-town topology can't be bulk-consolidated without
+  hand-rolled reservation surgery (corruption risk) or unreliable
+  quota/scoring-dependent setups. Camp mode is unchanged.
+
+### Internal
+- New `Tasks/HubHaulSearchEntry.cs` per-request claim + `_hubClaimCounts`
+  herd-guard; `WagonEnhancementData.HubHaulRequest` + teardown; new
+  `Patches/HaulDiagnosticsPatch.cs`; KC panel entries for both flags.
+- Version bump `1.0.19.0` → `1.0.20.0`.
+
+---
+
 ## [1.0.19] — 2026-05-26
 
 ### Changed

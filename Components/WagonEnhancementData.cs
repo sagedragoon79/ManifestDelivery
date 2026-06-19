@@ -117,16 +117,41 @@ namespace ManifestDelivery.Components
         public bool LastHubHaulScanWasEmpty { get; set; }
 
         /// <summary>
-        /// The requester assigned during a hub haul search.
-        /// Stored for cleanup if the wagon parks without executing.
+        /// The requester assigned during a hub haul search (legacy / non-multi-
+        /// source path). Stored for cleanup if the wagon parks without executing.
         /// </summary>
         public LogisticsRequester? HubHaulRequester { get; set; }
 
         /// <summary>
-        /// Cleans up a hub haul assignment if one is pending.
+        /// The specific DELIVER request claimed during a multi-source hub haul.
+        /// Stored separately from HubHaulRequester because it's torn down via the
+        /// per-request LogisticsRequest.UnassignWorker, not the requester overload.
+        /// </summary>
+        public ItemRequest? HubHaulRequest { get; set; }
+
+        /// <summary>
+        /// Cleans up a hub haul assignment if one is pending — handles both the
+        /// per-request (multi-source) claim and the legacy per-requester claim.
         /// </summary>
         public void ClearHubHaulAssignment(TransportWagon wagon)
         {
+            if (HubHaulRequest != null)
+            {
+                ManifestDelivery.Tasks.HubHaulSearchEntry.ReleaseHubClaim(HubHaulRequest);
+                try
+                {
+                    HubHaulRequest.UnassignWorker(
+                        wagon,
+                        LogisticsAssignment.AssignmentCategory.Default);
+                }
+                catch (System.Exception ex)
+                {
+                    ManifestDeliveryMod.Log.Warning(
+                        $"[MD] ClearHubHaulAssignment (request) failed for {wagon?.name}: {ex.Message}");
+                }
+                HubHaulRequest = null;
+            }
+
             if (HubHaulRequester == null) return;
 
             try

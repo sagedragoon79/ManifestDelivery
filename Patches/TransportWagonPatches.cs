@@ -260,7 +260,19 @@ namespace ManifestDelivery.Patches
                 data.CampHaulRequester = null;
             }
 
-            // Clear hub haul assignment once task actually starts
+            // Clear hub haul assignment once task actually starts. The claim is
+            // now permanent for the task's duration, so just drop our tracking
+            // reference (do NOT unassign — that would cancel the in-flight task).
+            if (data.HubHaulRequest != null)
+            {
+                // Task started: the winning wagon now owns the route, so release
+                // the herd-tracking slot (the request's unreserved deficit has
+                // dropped, which keeps other wagons off it from here).
+                ManifestDelivery.Tasks.HubHaulSearchEntry.ReleaseHubClaim(data.HubHaulRequest);
+                ManifestDeliveryMod.LogVerbose(
+                    $"[MD] HubHaul: {wagon.name} started multi-source logistics task.");
+                data.HubHaulRequest = null;
+            }
             if (data.HubHaulRequester != null)
             {
                 ManifestDeliveryMod.LogVerbose(

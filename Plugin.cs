@@ -3,7 +3,7 @@ using MelonLoader;
 using UnityEngine;
 
 // MelonLoader mod registration attributes (assembly-level)
-[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.19", "SageDragoon")]
+[assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.20", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
 
 namespace ManifestDelivery
@@ -30,6 +30,7 @@ namespace ManifestDelivery
         // ── Camp stockyard ────────────────────────────────────────────────────
         public static MelonPreferences_Entry<bool>  CampHaulEnabled { get; private set; } = null!;
         public static MelonPreferences_Entry<bool>  HubHaulEnabled  { get; private set; } = null!;
+        public static MelonPreferences_Entry<bool>  HubMultiSourcePickup { get; private set; } = null!;
         public static MelonPreferences_Entry<float> CampWorkRadius  { get; private set; } = null!;
         public static MelonPreferences_Entry<float> HubWorkRadius   { get; private set; } = null!;
 
@@ -52,6 +53,9 @@ namespace ManifestDelivery
 
         // ── Verbose logging toggle ────────────────────────────────────────────
         public static MelonPreferences_Entry<bool> VerboseLogging { get; private set; } = null!;
+
+        // ── Haul diagnostics (Approach A instrumentation) ─────────────────────
+        public static MelonPreferences_Entry<bool> HaulDiagnostics { get; private set; } = null!;
 
         // ── Logger shortcut used throughout the mod ───────────────────────────
         public static MelonLogger.Instance Log => Instance.LoggerInstance;
@@ -92,6 +96,18 @@ namespace ManifestDelivery
                               "to the MelonLoader log. Useful for diagnosing wagon routing, " +
                               "but noisy on a busy map. Warnings and errors always log " +
                               "regardless. Default false.");
+
+            HaulDiagnostics = cat.CreateEntry(
+                "HaulDiagnostics", false,
+                display_name: "Haul Diagnostics",
+                description:  "Diagnostic instrumentation. When true, dumps the full shape of " +
+                              "every wagon haul the moment it is built — pickup (TakeOut) vs " +
+                              "dropoff (Deliver) stops, items + counts, source/dest names, each " +
+                              "served request's throttle params (maxTripsPerQuery / " +
+                              "maxItemCountPerTrip / minItemCountForBulkTransport), and the " +
+                              "wagon's carry capacity. Use it to see whether wagons already do " +
+                              "multi-source pickups and which limiter caps them. Live toggle; " +
+                              "near-zero cost when off. Default false.");
 
             // ── Return-trip settings ─────────────────────────────────────────
             ReturnTripEnabled = cat.CreateEntry(
@@ -148,6 +164,19 @@ namespace ManifestDelivery
                               "(markets, shelters/residences, producers, storages). Without " +
                               "this, Hub wagons only do opportunistic backhaul after a vanilla-" +
                               "assigned delivery. Default true.");
+
+            HubMultiSourcePickup = cat.CreateEntry(
+                "HubMultiSourcePickup", false,
+                display_name: "Hub Multi-Source Pickup (experimental)",
+                description:  "EXPERIMENTAL. When true, Hub-mode wagons claim only DELIVER " +
+                              "(restock) requests — never producer TakeOut requests — and claim " +
+                              "the specific delivery request rather than the whole building. A " +
+                              "Deliver-shaped claim routes through the game's multi-source path " +
+                              "(FindBestRouteDeliver), so one wagon fans across several source " +
+                              "storages up to carry capacity before delivering, instead of one " +
+                              "near-empty pickup per trip. Hub mode only (Camp is unaffected). " +
+                              "Default false — flip on to test, watch Haul Diagnostics for " +
+                              "multi-PICKUP hauls.");
 
             CampWorkRadius = cat.CreateEntry(
                 "CampWorkRadius", 120f,
@@ -229,7 +258,7 @@ namespace ManifestDelivery
             // mod init would use an empty save-name, and the file would leak across
             // different save games — this sidesteps both.
 
-            LoggerInstance.Msg("Manifest Delivery 1.0.19 loaded.");
+            LoggerInstance.Msg("Manifest Delivery 1.0.20 loaded.");
 
             // Optional: register with Keep Clarity's settings panel if installed.
             KeepClarityIntegration.TryRegisterAll();
@@ -242,6 +271,10 @@ namespace ManifestDelivery
             // replaced on map reload, and a Unity-null Object key still
             // hashes (would leak slowly across multiple loads).
             ManifestDelivery.Tasks.ReturnTripSearchEntry.ClearStorageCache();
+
+            // Drop the Hub multi-source claim map — its keys are ItemRequest
+            // references from the previous map that get replaced on reload.
+            ManifestDelivery.Tasks.HubHaulSearchEntry.ClearHubClaims();
 
             // Stats are per-save: drop in-memory snapshot so the next
             // delivery on a different save doesn't append onto the previous

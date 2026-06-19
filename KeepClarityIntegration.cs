@@ -131,6 +131,11 @@ namespace ManifestDelivery
             Reg("Camp & Hub", ManifestDeliveryMod.HubHaulEnabled,
                 NewMeta("Hub Proactive Distribution",
                     "Hub wagons proactively serve any request in radius (markets, shelters, producers, storage)"));
+            Reg("Camp & Hub", ManifestDeliveryMod.HubMultiSourcePickup,
+                NewMeta("Hub Multi-Source Pickup (experimental)",
+                    "Hub wagons claim only Deliver/restock requests (the specific request, not the whole building), " +
+                    "so one wagon fans across several source storages up to capacity instead of one near-empty pickup. " +
+                    "Hub mode only. Off by default — experimental."));
             Reg("Camp & Hub", ManifestDeliveryMod.CampWorkRadius,
                 NewMeta("Camp Work Radius", min: 50f, max: 250f,
                     tooltip: "Default 120u covers a typical remote camp"));
@@ -155,6 +160,14 @@ namespace ManifestDelivery
             Reg("Hotkeys", ManifestDeliveryMod.ModeCycleKeyName,
                 NewMeta("Cycle Wagon Shop Mode", restartRequired: true,
                     tooltip: "Unity KeyCode name. Cycles Standard / Camp / Hub while a Wagon Shop is selected."));
+
+            // === Diagnostics ===
+            // Live — the pref is re-read on every wagon haul build (OnSearchSuccess).
+            Reg("Diagnostics", ManifestDeliveryMod.HaulDiagnostics,
+                NewMeta("Haul Diagnostics",
+                    "Logs the full shape of each wagon haul (pickup/dropoff stops, items, " +
+                    "served-request throttle params, carry capacity) to the MelonLoader log. " +
+                    "Investigative tool for multi-pickup tuning. Off by default."));
         }
     }
 }

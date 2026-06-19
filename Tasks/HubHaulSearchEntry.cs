@@ -106,24 +106,59 @@ namespace ManifestDelivery.Tasks
             }
             _data.LastHubHaulScanWasEmpty = false;
 
-            // ── Temporarily assign the requester to this wagon ────────────────
+            // ── Claim work for this wagon ─────────────────────────────────────
             try
             {
-                best.AssignWorker(
-                    _wagon,
-                    LogisticsAssignment.AssignmentCategory.Default,
-                    LogisticsAssignment.AssignmentPriority.Default);
+                bool multiSource = ManifestDeliveryMod.HubMultiSourcePickup != null
+                                   && ManifestDeliveryMod.HubMultiSourcePickup.Value;
 
-                _data.HubHaulRequester = best;
+                if (multiSource)
+                {
+                    // Multi-source mode: claim ONLY the specific DELIVER request,
+                    // via the per-request LogisticsRequest.AssignWorker overload —
+                    // NOT LogisticsRequester.AssignWorker, which would also claim
+                    // the building's TakeOut (move-out) requests and reintroduce
+                    // single-source hauls. A Deliver-shaped claim routes through
+                    // FindBestRouteDeliver, which fans the wagon across multiple
+                    // source storages up to carry capacity before one drop-off.
+                    // (HasEligibleRequest already gated `best` to Deliver-only.)
+                    ItemRequest? deliver = GetEligibleDeliverRequest(best);
+                    if (deliver == null) return null;  // gate guarantees one; be safe
 
-                string items = DescribeRequests(best);
-                float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] HubHaul CLAIM: {_wagon.name} → " +
-                    $"{best.gameObject.name} " +
-                    $"[{items}] " +
-                    $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
-                    $"{distFromShop:F0}u from hub)");
+                    deliver.AssignWorker(
+                        _wagon,
+                        LogisticsAssignment.AssignmentCategory.Default,
+                        LogisticsAssignment.AssignmentPriority.Default);
+
+                    _data.HubHaulRequest = deliver;
+                    RegisterHubClaim(deliver);  // herd guard bookkeeping
+
+                    string items = DescribeRequests(best);
+                    float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
+                    ManifestDeliveryMod.LogVerbose(
+                        $"[MD] HubHaul CLAIM (multi-source Deliver): {_wagon.name} → " +
+                        $"{best.gameObject.name} [{items}] " +
+                        $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
+                        $"{distFromShop:F0}u from hub)");
+                }
+                else
+                {
+                    best.AssignWorker(
+                        _wagon,
+                        LogisticsAssignment.AssignmentCategory.Default,
+                        LogisticsAssignment.AssignmentPriority.Default);
+
+                    _data.HubHaulRequester = best;
+
+                    string items = DescribeRequests(best);
+                    float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
+                    ManifestDeliveryMod.LogVerbose(
+                        $"[MD] HubHaul CLAIM: {_wagon.name} → " +
+                        $"{best.gameObject.name} " +
+                        $"[{items}] " +
+                        $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
+                        $"{distFromShop:F0}u from hub)");
+                }
             }
             catch (System.Exception ex)
             {
@@ -155,6 +190,9 @@ namespace ManifestDelivery.Tasks
             float radiusSqr = shop.WorkRadius * shop.WorkRadius;
             Vector3 shopPos = shop.transform.position;
 
+            bool multiSource = ManifestDeliveryMod.HubMultiSourcePickup != null
+                               && ManifestDeliveryMod.HubMultiSourcePickup.Value;
+
             LogisticsRequester? bestRequester = null;
             float bestDistSqr = float.MaxValue;
 
@@ -173,6 +211,17 @@ namespace ManifestDelivery.Tasks
                 // building-type filtering. Markets, shelters, producers,
                 // storages are all fair game.
                 if (!HasEligibleRequest(requester)) continue;
+
+                // Herd guard (multi-source mode): all Hub wagons share the scan
+                // cooldown, so without this they all claim the same nearest
+                // Deliver request in one burst. Skip a request already covered by
+                // enough Hub wagons for its remaining unreserved deficit, so the
+                // fleet spreads across distinct requests.
+                if (multiSource)
+                {
+                    ItemRequest? dreq = GetEligibleDeliverRequest(requester);
+                    if (dreq == null || DeliverAlreadyCovered(dreq)) continue;
+                }
 
                 // Score by distance to the WAGON — the real driving distance.
                 float wagonDistSqr = (requester.transform.position - _wagon.transform.position).sqrMagnitude;
@@ -195,10 +244,86 @@ namespace ManifestDelivery.Tasks
             foreach (var kv in requester.activeDeliveryRequests)
                 if (PassesBulkCheck(kv.Value)) return true;
 
+            // Multi-source mode never selects a requester for its TakeOut work —
+            // a claimed TakeOut request routes single-source (FindBestRouteTakeOut),
+            // which is the near-empty-haul symptom. Deliver-only here steers the
+            // wagon onto the multi-source FindBestRouteDeliver path.
+            if (ManifestDeliveryMod.HubMultiSourcePickup != null
+                && ManifestDeliveryMod.HubMultiSourcePickup.Value)
+                return false;
+
             foreach (var kv in requester.activeMoveOutRequests)
                 if (PassesBulkCheck(kv.Value)) return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// Returns the first bulk-eligible DELIVER request on this requester, or
+        /// null. Used by multi-source mode to claim exactly that request (not the
+        /// whole requester) so the wagon routes through FindBestRouteDeliver.
+        /// </summary>
+        private ItemRequest? GetEligibleDeliverRequest(LogisticsRequester requester)
+        {
+            foreach (var kv in requester.activeDeliveryRequests)
+                if (PassesBulkCheck(kv.Value)) return kv.Value;
+            return null;
+        }
+
+        // ── Herd guard: cap MD Hub wagons per Deliver request ─────────────────
+        // All Hub wagons share the scan cooldown, so absent a guard they all
+        // claim the same nearest Deliver request in one scan burst (observed:
+        // 12 wagons onto one forge). We track how many Hub wagons MD has steered
+        // onto each Deliver request and skip a request already covered by enough
+        // wagons for its remaining unreserved deficit. Same-burst herding is
+        // caught by the live count (incremented synchronously as each wagon
+        // claims within the frame); post-reservation re-herding is caught by
+        // GetTotalUnreservedCount dropping once the winning wagon's task reserves.
+        private const int NominalItemsPerWagonLoad = 100;
+
+        private static readonly Dictionary<ItemRequest, int> _hubClaimCounts =
+            new Dictionary<ItemRequest, int>();
+
+        internal static void RegisterHubClaim(ItemRequest deliver)
+        {
+            if (deliver == null) return;
+            _hubClaimCounts.TryGetValue(deliver, out int n);
+            _hubClaimCounts[deliver] = n + 1;
+        }
+
+        internal static void ReleaseHubClaim(ItemRequest deliver)
+        {
+            if (deliver == null) return;
+            if (_hubClaimCounts.TryGetValue(deliver, out int n))
+            {
+                if (n <= 1) _hubClaimCounts.Remove(deliver);
+                else        _hubClaimCounts[deliver] = n - 1;
+            }
+        }
+
+        /// <summary>
+        /// Drops all tracked Hub claims. Called on scene unload so ItemRequest
+        /// keys from a previous save don't linger as stale dictionary entries.
+        /// </summary>
+        internal static void ClearHubClaims() => _hubClaimCounts.Clear();
+
+        /// <summary>
+        /// True when enough Hub wagons are already steered onto this Deliver
+        /// request to cover its remaining unreserved deficit (one wagon-load per
+        /// ~NominalItemsPerWagonLoad items needed).
+        /// </summary>
+        private static bool DeliverAlreadyCovered(ItemRequest deliver)
+        {
+            if (deliver == null) return false;
+            if (!_hubClaimCounts.TryGetValue(deliver, out int claimed) || claimed <= 0)
+                return false;
+
+            uint unreserved = deliver.GetTotalUnreservedCount();
+            if (unreserved == 0) return true;  // deficit already reserved away
+
+            int loadsNeeded = Mathf.Max(1,
+                Mathf.CeilToInt(unreserved / (float)NominalItemsPerWagonLoad));
+            return claimed >= loadsNeeded;
         }
 
         /// <summary>Mirrors PassesBulkTransportItemCountRestrictions.</summary>
