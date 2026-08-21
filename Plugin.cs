@@ -57,6 +57,10 @@ namespace ManifestDelivery
         // ── Haul diagnostics (Approach A instrumentation) ─────────────────────
         public static MelonPreferences_Entry<bool> HaulDiagnostics { get; private set; } = null!;
 
+        // ── Storage priority — M0 routing spike (see _handoffs/…storage-priorities-fold.md)
+        public static MelonPreferences_Entry<string> StoragePriorityTestTarget { get; private set; } = null!;
+        public static MelonPreferences_Entry<float>  StoragePriorityTestBias   { get; private set; } = null!;
+
         // ── Logger shortcut used throughout the mod ───────────────────────────
         public static MelonLogger.Instance Log => Instance.LoggerInstance;
 
@@ -108,6 +112,29 @@ namespace ManifestDelivery
                               "wagon's carry capacity. Use it to see whether wagons already do " +
                               "multi-source pickups and which limiter caps them. Live toggle; " +
                               "near-zero cost when off. Default false.");
+
+            // ── Storage priority — M0 routing spike ──────────────────────────
+            // Proves the GetBaseScore postfix actually redirects haulers before
+            // any tier model / UI / persistence is built. Empty target = fully
+            // disabled (single string-empty check on the logistics hot path).
+            StoragePriorityTestTarget = cat.CreateEntry(
+                "StoragePriorityTestTarget", "",
+                display_name: "Storage Priority — Test Target (spike)",
+                description:  "EXPERIMENTAL SPIKE. Case-insensitive substring of a storage " +
+                              "building's object name (e.g. 'Storehouse', 'root_cellar'). " +
+                              "Matching storages get a routing score bonus, so haulers should " +
+                              "prefer them as a destination even when farther away. Leave EMPTY " +
+                              "to disable entirely. Proof-of-concept for the Storage Priorities " +
+                              "feature — no UI or persistence yet.");
+
+            StoragePriorityTestBias = cat.CreateEntry(
+                "StoragePriorityTestBias", 150f,
+                display_name: "Storage Priority — Test Bias (spike)",
+                description:  "Score added to matching storages. Calibration: vanilla base score " +
+                              "is 0-100 (emptier = higher) and distance subtracts 1 point per " +
+                              "world unit, so 150 outweighs a full-vs-empty swing plus ~50u of " +
+                              "extra travel. Granary/Root Cellar/Treasury carry a built-in +100, " +
+                              "so exceed that to out-rank them.");
 
             // ── Return-trip settings ─────────────────────────────────────────
             ReturnTripEnabled = cat.CreateEntry(
@@ -275,6 +302,10 @@ namespace ManifestDelivery
             // Drop the Hub multi-source claim map — its keys are ItemRequest
             // references from the previous map that get replaced on reload.
             ManifestDelivery.Tasks.HubHaulSearchEntry.ClearHubClaims();
+
+            // Storage-priority spike caches key on instance IDs, which don't
+            // survive a map reload.
+            ManifestDelivery.Patches.StoragePriorityPatches.ClearCaches();
 
             // Stats are per-save: drop in-memory snapshot so the next
             // delivery on a different save doesn't append onto the previous
