@@ -21,14 +21,25 @@ namespace ManifestDelivery.Patches
         {
             try
             {
-                if (ManifestDeliveryMod.StatsEnabled == null) return;
-                if (!ManifestDeliveryMod.StatsEnabled.Value) return;
-
-                StatsTracker.SaveToDisk();
+                if (ManifestDeliveryMod.StatsEnabled != null && ManifestDeliveryMod.StatsEnabled.Value)
+                    StatsTracker.SaveToDisk();
             }
             catch (System.Exception ex)
             {
                 ManifestDeliveryMod.Log.Warning($"[MD][Stats] SaveToDisk failed: {ex.Message}");
+            }
+
+            // Storage priority tiers ride the same save cadence. Separately
+            // gated — they have nothing to do with the stats toggle.
+            try
+            {
+                if (ManifestDeliveryMod.StoragePriorityEnabled != null
+                    && ManifestDeliveryMod.StoragePriorityEnabled.Value)
+                    StoragePriorityStore.SaveToDisk();
+            }
+            catch (System.Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning($"[MD][StoragePri] SaveToDisk failed: {ex.Message}");
             }
         }
     }

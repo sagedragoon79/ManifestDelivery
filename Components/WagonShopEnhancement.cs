@@ -105,7 +105,10 @@ namespace ManifestDelivery.Components
             }
         }
 
-        private static string GetActiveSaveName()
+        // internal so StoragePriorityStore can share the exact same latched
+        // accessor rather than re-deriving it (the latch is what fixed the
+        // v1.0.16/1.0.18 save-name races — one implementation, not two).
+        internal static string GetActiveSaveName()
         {
             string live;
             try { live = SaveManager.activeSaveFileName ?? ""; }

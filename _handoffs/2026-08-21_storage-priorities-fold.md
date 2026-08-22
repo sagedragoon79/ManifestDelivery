@@ -177,11 +177,22 @@ If built, it must be:
 
 ## Build plan
 
-- **M0 — Routing spike.** Postfix `GetBaseScore`, hardcode one building/item at a
-  high bias, confirm haulers actually change destination in-game. Proves the
-  whole concept in ~30 lines. *Do this before building any UI.*
-- **M1 — Data + persistence.** Tier model, per-save file via MD's latch pattern;
-  round-trip across a save switch and a building relocation.
+- ~~**M0 — Routing spike.**~~ **DONE** (`Patches/StoragePriorityPatches.cs`).
+  Postfix verified to reach the Burst scorer; anti-ping-pong contract added.
+  Superseded by M1 — the name-substring test pref is gone.
+- **M1 — Data + persistence.** **BUILT, NOT YET PLAY-TESTED.**
+  `Components/StoragePriorityData.cs` (tier enum + per-building component),
+  `Systems/StoragePriorityStore.cs` (per-save file, MD latch pattern).
+  Tiers live on a component so relocation is free; the store merges live
+  components into the on-disk map at their current position.
+  Two persistence traps found and closed during the build:
+  1. A rebuild-from-scratch sync would wipe tiers if the player saved during
+     the attach/restore window → sync is a **merge**, and un-restored
+     components may never write.
+  2. `SaveToDisk` before the store had ever read the file would delete the
+     player's tiers → it now loads before merging.
+  Temporary input until M2: a configurable hotkey (default **K**) cycles the
+  selected storage's tier.
 - **M2 — UI.** Per-item tier control in the storage window via the
   `SetTargetData` postfix pattern.
 - **M3 — Settings + polish.** KC registration (`KeepClarityIntegration.cs`

@@ -57,9 +57,11 @@ namespace ManifestDelivery
         // ── Haul diagnostics (Approach A instrumentation) ─────────────────────
         public static MelonPreferences_Entry<bool> HaulDiagnostics { get; private set; } = null!;
 
-        // ── Storage priority — M0 routing spike (see _handoffs/…storage-priorities-fold.md)
-        public static MelonPreferences_Entry<string> StoragePriorityTestTarget { get; private set; } = null!;
-        public static MelonPreferences_Entry<float>  StoragePriorityTestBias   { get; private set; } = null!;
+        // ── Storage priorities (see _handoffs/…storage-priorities-fold.md) ────
+        public static MelonPreferences_Entry<bool>   StoragePriorityEnabled  { get; private set; } = null!;
+        public static MelonPreferences_Entry<float>  StoragePriorityStrength { get; private set; } = null!;
+        public static MelonPreferences_Entry<string> StoragePriorityCycleKey { get; private set; } = null!;
+        private static KeyCode _storagePriorityCycleKey = KeyCode.K;
 
         // ── Logger shortcut used throughout the mod ───────────────────────────
         public static MelonLogger.Instance Log => Instance.LoggerInstance;
@@ -113,28 +115,36 @@ namespace ManifestDelivery
                               "multi-source pickups and which limiter caps them. Live toggle; " +
                               "near-zero cost when off. Default false.");
 
-            // ── Storage priority — M0 routing spike ──────────────────────────
-            // Proves the GetBaseScore postfix actually redirects haulers before
-            // any tier model / UI / persistence is built. Empty target = fully
-            // disabled (single string-empty check on the logistics hot path).
-            StoragePriorityTestTarget = cat.CreateEntry(
-                "StoragePriorityTestTarget", "",
-                display_name: "Storage Priority — Test Target (spike)",
-                description:  "EXPERIMENTAL SPIKE. Case-insensitive substring of a storage " +
-                              "building's object name (e.g. 'Storehouse', 'root_cellar'). " +
-                              "Matching storages get a routing score bonus, so haulers should " +
-                              "prefer them as a destination even when farther away. Leave EMPTY " +
-                              "to disable entirely. Proof-of-concept for the Storage Priorities " +
-                              "feature — no UI or persistence yet.");
+            // ── Storage priorities ───────────────────────────────────────────
+            StoragePriorityEnabled = cat.CreateEntry(
+                "StoragePriorityEnabled", false,
+                display_name: "Storage Priorities (experimental)",
+                description:  "EXPERIMENTAL. Lets you mark a storage as Preferred or Last Resort " +
+                              "so haulers route deliveries there first (or avoid it until others " +
+                              "fill). Affects DESTINATION choice only — it never makes a storage " +
+                              "attractive to empty, so it cannot ping-pong goods between " +
+                              "storages. Default off.");
 
-            StoragePriorityTestBias = cat.CreateEntry(
-                "StoragePriorityTestBias", 150f,
-                display_name: "Storage Priority — Test Bias (spike)",
-                description:  "Score added to matching storages. Calibration: vanilla base score " +
-                              "is 0-100 (emptier = higher) and distance subtracts 1 point per " +
-                              "world unit, so 150 outweighs a full-vs-empty swing plus ~50u of " +
-                              "extra travel. Granary/Root Cellar/Treasury carry a built-in +100, " +
-                              "so exceed that to out-rank them.");
+            StoragePriorityStrength = cat.CreateEntry(
+                "StoragePriorityStrength", 150f,
+                display_name: "Storage Priority — Strength",
+                description:  "How hard a priority pulls, in routing score points. Calibration: " +
+                              "vanilla score is 0-100 (emptier ranks higher) and distance " +
+                              "subtracts ~1 point per world unit, so 150 outweighs a full-vs-" +
+                              "empty swing plus ~50u of extra travel. Granary/Root Cellar/" +
+                              "Treasury carry a built-in +100, so exceed that to out-rank them. " +
+                              "Lower values just break ties; higher values almost always win. " +
+                              "Preferred is automatically tapered as the storage fills.");
+
+            StoragePriorityCycleKey = cat.CreateEntry(
+                "StoragePriorityCycleKey", "K",
+                display_name: "Storage Priority — Cycle Key",
+                description:  "TEMPORARY (until the in-window UI lands): with a storage building " +
+                              "selected, press this key to cycle its priority " +
+                              "Unset → Preferred → Normal → Last Resort. Unity KeyCode name.");
+
+            if (System.Enum.TryParse(StoragePriorityCycleKey.Value, ignoreCase: true, out KeyCode spKey))
+                _storagePriorityCycleKey = spKey;
 
             // ── Return-trip settings ─────────────────────────────────────────
             ReturnTripEnabled = cat.CreateEntry(
@@ -303,9 +313,11 @@ namespace ManifestDelivery
             // references from the previous map that get replaced on reload.
             ManifestDelivery.Tasks.HubHaulSearchEntry.ClearHubClaims();
 
-            // Storage-priority spike caches key on instance IDs, which don't
-            // survive a map reload.
+            // Storage-priority caches key on instance IDs / bucket refs, which
+            // don't survive a map reload; the store reloads per save.
             ManifestDelivery.Patches.StoragePriorityPatches.ClearCaches();
+            ManifestDelivery.Patches.StoragePriorityAttacher.Reset();
+            ManifestDelivery.Systems.StoragePriorityStore.Clear();
 
             // Stats are per-save: drop in-memory snapshot so the next
             // delivery on a different save doesn't append onto the previous
@@ -315,6 +327,11 @@ namespace ManifestDelivery
 
         public override void OnUpdate()
         {
+            // Storage priorities: keep components attached to storages, and
+            // handle the temporary set-tier hotkey until the M2 UI lands.
+            Patches.StoragePriorityAttacher.Tick();
+            HandleStoragePriorityHotkey();
+
             // Stats report keybind: CTRL+SHIFT+<configured key>
             if (StatsEnabled != null && StatsEnabled.Value
                 && Input.GetKeyDown(_statsReportKey)
@@ -325,11 +342,48 @@ namespace ManifestDelivery
             }
         }
 
+        /// <summary>
+        /// TEMPORARY input path for storage priorities until the M2 in-window UI
+        /// exists: cycles the tier of whichever storage building is selected.
+        /// Iterating live components (a small set) avoids needing the game's
+        /// selection manager.
+        /// </summary>
+        private static void HandleStoragePriorityHotkey()
+        {
+            if (StoragePriorityEnabled == null || !StoragePriorityEnabled.Value) return;
+            if (!Input.GetKeyDown(_storagePriorityCycleKey)) return;
+
+            try
+            {
+                foreach (var data in Components.StoragePriorityData.Live)
+                {
+                    if (data == null) continue;
+                    var sel = data.GetComponent<SelectableComponent>();
+                    if (sel == null || !sel.IsSelected) continue;
+
+                    var tier = data.CycleDefaultTier();
+                    Log.Msg($"[MD][StoragePri] '{data.gameObject.name}' → {tier}");
+                    break;   // only the selected one
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Log.Warning($"[MD][StoragePri] Cycle hotkey failed: {ex.Message}");
+            }
+        }
+
         public override void OnApplicationQuit()
         {
             // Flush stats to disk on game exit so we don't lose unsaved data
             // when the player quits without triggering SaveManager.Save.
             try { ManifestDelivery.Systems.StatsTracker.SaveToDisk(); }
+            catch { /* best effort on shutdown */ }
+
+            try
+            {
+                if (StoragePriorityEnabled != null && StoragePriorityEnabled.Value)
+                    ManifestDelivery.Systems.StoragePriorityStore.SaveToDisk();
+            }
             catch { /* best effort on shutdown */ }
         }
     }
