@@ -5,6 +5,47 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [1.0.21] — 2026-08-24
+
+### Fixed
+- **Wagon Shop modes reverting to Standard after save/reload.** Long-standing,
+  user-reported, and intermittent in a way that made it hard to pin down.
+  Farthest Frontier hands mods several different strings for the *same*
+  settlement, and MD keyed its per-save file on whichever one it happened to
+  see:
+  - `Grimtree_2026238203354/Grimtree` — the load hooks (no extension)
+  - `Grimtree_2026238203354/Grimtree**.sav**` — `SaveManager.Save` rebuilds
+    `activeSaveFileName` *with* the extension when it was empty
+  - `Grimtree_2026238203354/**AutoSave 1**` — autosaves
+
+  Each produced a **different** modes file, so settings written while playing
+  were never read back on reload, and every shop came back Standard. Whether it
+  bit you depended on which filename your last mode change landed in — hence the
+  "sometimes it works" behaviour. (Leftover duplicate files like
+  `Town_..._Town.sav.txt` next to `Town_..._Town.txt` are the fingerprint.)
+- **Fix:** every save name is now normalized to its **town folder** via
+  `SaveManager.GameFolder` before being latched, collapsing all three shapes to
+  one identity. This is also semantically correct — a manual save and its
+  autosaves are the same town and should share shop modes. Applied in both
+  `LatchSaveName` and `GetActiveSaveName`, so modes, hauling stats and (new)
+  storage priorities all inherit it.
+- **Your existing settings are migrated automatically.** On first load of a town
+  that has no canonical file yet, MD adopts the most recently written legacy
+  file (correctly picking the `.sav` variant when that's the newer one) and
+  immediately rewrites it under the canonical name, so migration happens once.
+  The legacy file is left in place as a rollback safety net.
+- **Hauling stats get the same treatment**, so per-shop history carries over
+  instead of restarting. Stats adopt the newest legacy file rather than merging
+  several — they're cumulative counters, and summing divergent copies would
+  double-count.
+
+### Internal
+- Version bump `1.0.20.0` → `1.0.21.0`.
+- Also present but **off by default and inert**: early work on a Storage
+  Priorities feature (`StoragePriorityEnabled`, default false).
+
+---
+
 ## [1.0.20] — 2026-06-19
 
 ### Added

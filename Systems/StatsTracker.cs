@@ -267,8 +267,10 @@ namespace ManifestDelivery.Systems
         {
             try
             {
-                string path = ResolveStatsPath(saveName);
+                string canonical = ResolveStatsPath(saveName);
+                string path = ResolveLoadPath(saveName, canonical);
                 if (!File.Exists(path)) return;
+                bool migrating = !string.Equals(path, canonical, StringComparison.OrdinalIgnoreCase);
 
                 _shops.Clear();
                 WagonShopStats? cur = null;
@@ -322,11 +324,63 @@ namespace ManifestDelivery.Systems
                     }
                 }
                 ManifestDeliveryMod.Log.Msg($"[MD][Stats] Loaded {_shops.Count} shop record(s) for save '{saveName}'.");
+
+                // Finish the migration immediately so it happens once, rather
+                // than re-reading the legacy file on every load.
+                if (migrating && _shops.Count > 0) SaveToDisk(saveName);
             }
             catch (Exception ex)
             {
                 ManifestDeliveryMod.Log.Warning($"[MD][Stats] Load failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Heals stats written before per-save data was keyed on the town folder.
+        /// Those fragmented one town's history across a file per save FILE
+        /// (Town_ts_Town.txt, Town_ts_Town.sav.txt, Town_ts_AutoSave 1.txt, …).
+        ///
+        /// Adopts the most recently written legacy file rather than merging them:
+        /// these are cumulative lifetime counters, so summing divergent copies
+        /// would double-count. Newest = the session the player last played, which
+        /// is the history they expect to see.
+        /// </summary>
+        private static string ResolveLoadPath(string saveName, string canonical)
+        {
+            if (File.Exists(canonical)) return canonical;
+
+            try
+            {
+                string? dir = Path.GetDirectoryName(canonical);
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return canonical;
+
+                string prefix = saveName.Replace('/', '_').Replace('\\', '_') + "_";
+                string? newest = null;
+                DateTime newestTime = DateTime.MinValue;
+
+                foreach (string file in Directory.GetFiles(dir, "*.txt"))
+                {
+                    string name = Path.GetFileName(file);
+                    if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+
+                    DateTime stamp = File.GetLastWriteTimeUtc(file);
+                    if (stamp > newestTime) { newestTime = stamp; newest = file; }
+                }
+
+                if (newest != null)
+                {
+                    ManifestDeliveryMod.Log.Msg(
+                        $"[MD][Stats] Migrating hauling stats from legacy file " +
+                        $"'{Path.GetFileName(newest)}' → '{Path.GetFileName(canonical)}'.");
+                    return newest;
+                }
+            }
+            catch (Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning($"[MD][Stats] Legacy stats lookup failed: {ex.Message}");
+            }
+
+            return canonical;
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
