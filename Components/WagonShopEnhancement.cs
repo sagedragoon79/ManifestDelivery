@@ -63,16 +63,72 @@ namespace ManifestDelivery.Components
 
         private const string ModesDirName = "ManifestDelivery_Modes";
 
-        private static string GetSaveFilePath(string saveName)
+        /// <summary>Sanitize — a save name could contain path-invalid chars (it always contains '/').</summary>
+        private static string SanitizeSaveName(string saveName)
         {
-            // Sanitize — a save name could in theory contain path-invalid chars.
             string safe = saveName;
             if (string.IsNullOrEmpty(safe)) safe = "default";
             foreach (char c in Path.GetInvalidFileNameChars())
                 safe = safe.Replace(c, '_');
+            return safe;
+        }
+
+        private static string GetSaveFilePath(string saveName)
+        {
             return Path.Combine(
                 Application.dataPath, "..", "UserData", ModesDirName,
-                $"{safe}.txt");
+                $"{SanitizeSaveName(saveName)}.txt");
+        }
+
+        /// <summary>
+        /// Path to read modes from, healing installs written before the
+        /// town-folder fix. Those wrote one file per SAVE FILE
+        /// (Town_ts_Town.txt, Town_ts_Town.sav.txt, Town_ts_AutoSave 1.txt);
+        /// we now write one per TOWN (Town_ts.txt). If the canonical file does
+        /// not exist yet, adopt the most recently written legacy file for this
+        /// town so nobody loses the modes they already set. The next save
+        /// rewrites them under the canonical name.
+        /// </summary>
+        private static string ResolveLoadPath(string saveIdentity)
+        {
+            string primary = GetSaveFilePath(saveIdentity);
+            if (File.Exists(primary)) return primary;
+
+            try
+            {
+                string? dir = Path.GetDirectoryName(primary);
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return primary;
+
+                // Build the prefix from the sanitized identity, NOT from the
+                // filename — GetFileNameWithoutExtension would truncate a town
+                // whose name contains a dot.
+                string prefix = SanitizeSaveName(saveIdentity) + "_";
+                string? newest = null;
+                System.DateTime newestTime = System.DateTime.MinValue;
+
+                foreach (string file in Directory.GetFiles(dir, "*.txt"))
+                {
+                    string name = Path.GetFileName(file);
+                    if (!name.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase)) continue;
+
+                    System.DateTime stamp = File.GetLastWriteTimeUtc(file);
+                    if (stamp > newestTime) { newestTime = stamp; newest = file; }
+                }
+
+                if (newest != null)
+                {
+                    ManifestDeliveryMod.Log.Msg(
+                        $"[MD] Migrating shop modes from legacy file " +
+                        $"'{Path.GetFileName(newest)}' → '{Path.GetFileName(primary)}'.");
+                    return newest;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning($"[MD] Legacy modes lookup failed: {ex.Message}");
+            }
+
+            return primary;
         }
 
         // Last non-empty save name we observed. SaveManager.activeSaveFileName
@@ -97,12 +153,53 @@ namespace ManifestDelivery.Components
         /// </summary>
         public static void LatchSaveName(string name)
         {
+            name = NormalizeSaveIdentity(name);
             if (string.IsNullOrEmpty(name)) return;
             if (_lastKnownSaveName != name)
             {
                 _lastKnownSaveName = name;
-                ManifestDeliveryMod.Log.Msg($"[MD] Save name latched: '{name}'");
+                ManifestDeliveryMod.Log.Msg($"[MD] Save identity latched: '{name}'");
             }
+        }
+
+        /// <summary>
+        /// Reduces any save-file name to the identity of the TOWN it belongs to.
+        ///
+        /// This fixes a real, user-reported mode-revert bug. FF hands us several
+        /// different strings for the same settlement:
+        ///   "Grimtree_2026238203354/Grimtree"        (load hooks — no extension)
+        ///   "Grimtree_2026238203354/Grimtree.sav"    (SaveManager.Save, when
+        ///                                             activeSaveFileName was
+        ///                                             empty it rebuilds it WITH
+        ///                                             the extension)
+        ///   "Grimtree_2026238203354/AutoSave 1"      (autosaves)
+        /// Keying on the raw name produced a *different* modes file for each, so
+        /// settings written while playing (…Grimtree.sav.txt, …AutoSave 1.txt)
+        /// were never read back on reload (…Grimtree.txt) and every shop came
+        /// back Standard. The UserData folder still shows the duplicates.
+        ///
+        /// The town folder is the stable identity — and it is also the *correct*
+        /// one: a manual save and its autosaves are the same town, so they
+        /// should share shop modes.
+        /// </summary>
+        private static string NormalizeSaveIdentity(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            try
+            {
+                // SaveManager.GameFolder returns everything up to and including
+                // the first '/', e.g. "Grimtree_2026238203354/".
+                string folder = SaveManager.GameFolder(raw);
+                if (!string.IsNullOrEmpty(folder))
+                    return folder.TrimEnd('/', '\\');
+            }
+            catch { /* fall through to the defensive path */ }
+
+            // No folder separator (older saves / unexpected shapes): at least
+            // strip the extension so ".sav" and bare names agree.
+            if (raw.EndsWith(".sav", System.StringComparison.OrdinalIgnoreCase))
+                raw = raw.Substring(0, raw.Length - 4);
+            return raw;
         }
 
         // internal so StoragePriorityStore can share the exact same latched
@@ -113,6 +210,10 @@ namespace ManifestDelivery.Components
             string live;
             try { live = SaveManager.activeSaveFileName ?? ""; }
             catch { live = ""; }
+
+            // Normalize to the town folder BEFORE latching, so an autosave or a
+            // ".sav"-suffixed name can never masquerade as a different save.
+            live = NormalizeSaveIdentity(live);
 
             if (!string.IsNullOrEmpty(live))
             {
@@ -138,7 +239,7 @@ namespace ManifestDelivery.Components
             _loadedForSave = current;
             SavedModes.Clear();
 
-            string path = GetSaveFilePath(current);
+            string path = ResolveLoadPath(current);
             if (!File.Exists(path))
             {
                 ManifestDeliveryMod.Log.Msg(
