@@ -262,6 +262,18 @@ namespace ManifestDelivery.Components
                     $"[MD] Loaded {SavedModes.Count} shop mode(s) for save '{current}'.");
                 foreach (var kvp in SavedModes)
                     ManifestDeliveryMod.Log.Msg($"[MD]   key={kvp.Key} mode={kvp.Value}");
+
+                // Finish the migration now. Modes are otherwise only written when
+                // a mode CHANGES, so a migrated town would keep re-reading the
+                // legacy file every load — and would lose its settings if that
+                // file were ever cleaned up. Writing the canonical file here makes
+                // the migration a one-time event. The legacy file is deliberately
+                // left in place as a rollback safety net.
+                if (!string.Equals(path, GetSaveFilePath(current), System.StringComparison.OrdinalIgnoreCase)
+                    && SavedModes.Count > 0)
+                {
+                    SaveModesToDisk();
+                }
             }
             catch (System.Exception ex)
             {
