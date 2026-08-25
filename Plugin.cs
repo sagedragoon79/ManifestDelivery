@@ -316,7 +316,6 @@ namespace ManifestDelivery
             // Storage-priority caches key on instance IDs / bucket refs, which
             // don't survive a map reload; the store reloads per save.
             ManifestDelivery.Patches.StoragePriorityPatches.ClearCaches();
-            ManifestDelivery.Patches.StoragePriorityAttacher.Reset();
             ManifestDelivery.Systems.StoragePriorityStore.Clear();
 
             // Stats are per-save: drop in-memory snapshot so the next
@@ -327,9 +326,9 @@ namespace ManifestDelivery
 
         public override void OnUpdate()
         {
-            // Storage priorities: keep components attached to storages, and
-            // handle the temporary set-tier hotkey until the M2 UI lands.
-            Patches.StoragePriorityAttacher.Tick();
+            // Storage priorities: temporary set-tier hotkey until the M2 UI
+            // lands. Components attach lazily on the logistics path — there is
+            // deliberately no periodic sweep here (one caused a visible hitch).
             HandleStoragePriorityHotkey();
 
             // Stats report keybind: CTRL+SHIFT+<configured key>
@@ -355,16 +354,11 @@ namespace ManifestDelivery
 
             try
             {
-                foreach (var data in Components.StoragePriorityData.Live)
-                {
-                    if (data == null) continue;
-                    var sel = data.GetComponent<SelectableComponent>();
-                    if (sel == null || !sel.IsSelected) continue;
+                var data = Patches.StoragePrioritySelection.FindSelected();
+                if (data == null) return;
 
-                    var tier = data.CycleDefaultTier();
-                    Log.Msg($"[MD][StoragePri] '{data.gameObject.name}' → {tier}");
-                    break;   // only the selected one
-                }
+                var tier = data.CycleDefaultTier();
+                Log.Msg($"[MD][StoragePri] '{data.gameObject.name}' → {tier}");
             }
             catch (System.Exception ex)
             {

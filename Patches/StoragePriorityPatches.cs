@@ -186,15 +186,30 @@ namespace ManifestDelivery.Patches
 
         // ── Component resolution ─────────────────────────────────────────────
 
+        /// <summary>
+        /// Resolves (and lazily creates) a storage's priority component.
+        ///
+        /// Attaching here rather than on a timer is deliberate: an earlier build
+        /// swept the scene with FindObjectsOfType&lt;StorageBuilding&gt;() every
+        /// 5 s, which walks every GameObject in the map and caused a visible
+        /// periodic hitch — and it kept scanning forever even once every storage
+        /// already had its component. This path costs one dictionary hit after
+        /// the first sight of a building, and AddComponent runs at most once per
+        /// storage. GetBaseScore is main-thread (it builds logistics job data),
+        /// so AddComponent here is safe.
+        /// </summary>
         private static StoragePriorityData? ResolveData(Resource resource)
         {
             int id = resource.GetInstanceID();
             if (_dataByInstance.TryGetValue(id, out var cached))
-                return cached;   // may be null — negative results are cached too
+                return cached;   // cached negatives return here too — no rework, no write
 
             StoragePriorityData? data = null;
             if (resource is StorageBuilding)          // load-bearing guard
-                data = resource.GetComponent<StoragePriorityData>();
+            {
+                data = resource.GetComponent<StoragePriorityData>()
+                       ?? resource.gameObject.AddComponent<StoragePriorityData>();
+            }
 
             _dataByInstance[id] = data;
             return data;
@@ -227,49 +242,47 @@ namespace ManifestDelivery.Patches
     }
 
     /// <summary>
-    /// Attaches <see cref="StoragePriorityData"/> to storage buildings.
-    /// Done on a throttled sweep rather than an Awake patch: StorageBuilding does
-    /// not declare its own Awake, so patching "StorageBuilding.Awake" would
-    /// resolve to a base-class Awake and fire for every building in the game —
-    /// the same trap as GetBaseScore. A sweep is simpler, keeps the hot path
-    /// clean, and picks up buildings constructed mid-session.
+    /// Finds the storage building the player currently has selected, attaching
+    /// its priority component if it does not have one yet.
+    ///
+    /// Only called from the set-tier hotkey, so the scene scan happens on an
+    /// explicit keypress rather than on a timer. (An earlier build swept every
+    /// 5 s and caused a visible periodic hitch — never put FindObjectsOfType on
+    /// a repeating schedule.) Live components are checked first, so the scan is
+    /// skipped entirely for any storage the logistics system has already seen.
     /// </summary>
-    internal static class StoragePriorityAttacher
+    internal static class StoragePrioritySelection
     {
-        private const float SweepInterval = 5f;
-        private static float _nextSweep;
-
-        internal static void Tick()
+        internal static StoragePriorityData? FindSelected()
         {
-            var enabled = ManifestDeliveryMod.StoragePriorityEnabled;
-            if (enabled == null || !enabled.Value) return;
-            if (Time.time < _nextSweep) return;
-            _nextSweep = Time.time + SweepInterval;
+            // Fast path — already-tracked storages.
+            foreach (var data in StoragePriorityData.Live)
+            {
+                if (data == null) continue;
+                var sel = data.GetComponent<SelectableComponent>();
+                if (sel != null && sel.IsSelected) return data;
+            }
 
+            // Slow path — a storage the logistics system has not touched yet.
+            // Acceptable here: user-initiated, at most once per keypress.
             try
             {
-                var all = UnityEngine.Object.FindObjectsOfType<StorageBuilding>();
-                int added = 0;
-                foreach (var sb in all)
+                foreach (var sb in UnityEngine.Object.FindObjectsOfType<StorageBuilding>())
                 {
                     if (sb == null) continue;
-                    if (sb.GetComponent<StoragePriorityData>() != null) continue;
-                    sb.gameObject.AddComponent<StoragePriorityData>();
-                    added++;
-                }
-                if (added > 0)
-                {
-                    StoragePriorityPatches.ClearCaches();   // re-resolve negative caches
-                    ManifestDeliveryMod.Log.Msg(
-                        $"[MD][StoragePri] Tracking {added} new storage building(s).");
+                    var sel = sb.GetComponent<SelectableComponent>();
+                    if (sel == null || !sel.IsSelected) continue;
+
+                    return sb.GetComponent<StoragePriorityData>()
+                           ?? sb.gameObject.AddComponent<StoragePriorityData>();
                 }
             }
             catch (Exception ex)
             {
-                ManifestDeliveryMod.Log.Warning($"[MD][StoragePri] Attach sweep failed: {ex.Message}");
+                ManifestDeliveryMod.Log.Warning($"[MD][StoragePri] Selection lookup failed: {ex.Message}");
             }
-        }
 
-        internal static void Reset() => _nextSweep = 0f;
+            return null;
+        }
     }
 }
