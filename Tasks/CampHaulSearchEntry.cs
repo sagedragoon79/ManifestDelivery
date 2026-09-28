@@ -7,10 +7,12 @@ namespace ManifestDelivery.Tasks
 {
     /// <summary>
     /// Injected into every TransportWagon's search entry list at priority 2
-    /// (above LogisticsProxy = 0, below ReturnTrip = 3).
+    /// (ties with LogisticsProxy = 2 and sorts after it; below ReturnTrip = 3).
     ///
-    /// EXECUTION ORDER within a single task-search cycle:
-    ///   KickOut(10) → ReturnTrip(3) → CampHaul(2) → LogisticsProxy(0) → ParkWagon(-10)
+    /// EXECUTION ORDER within a single task-search cycle (see ClaimHelpers):
+    ///   KickOut(10) → ReturnTrip(3) → LogisticsProxy(2) → CampHaul(2) →
+    ///   HubHaul(1) → ParkWagon(-10)
+    /// so LogisticsProxy uses a CampHaul claim on its next search.
     ///
     /// WHAT IT DOES:
     ///   When the wagon belongs to a Camp-mode shop and is idle, this entry
@@ -21,21 +23,23 @@ namespace ManifestDelivery.Tasks
     ///   picks up whatever the camp produces and hauls it to wherever the
     ///   game's logistics system routes it (typically a hub storage building).
     ///
-    ///   The nearest eligible requester is temporarily assigned to the wagon,
-    ///   then this entry returns null so LogisticsProxy creates the real task.
+    ///   The nearest eligible requester's active requests are claimed for the
+    ///   wagon, then this entry returns null so LogisticsProxy creates the real
+    ///   task. Claims are released once a route is built (WagonEnhancementData).
     ///
     /// EXCLUSIONS:
     ///   Storage buildings are skipped — camp wagons pick up from PRODUCTION
     ///   buildings, not shuffle between storages.
     ///
     /// COOLDOWN:
-    ///   Scans at most once every 10 seconds per wagon to avoid performance
-    ///   impact on task search cycles.
+    ///   Scans at most once every 1.5 seconds per wagon, and never while the
+    ///   wagon is already hauling or waiting on an earlier claim.
     /// </summary>
     public class CampHaulSearchEntry : TaskSearchEntry
     {
         private readonly TransportWagon _wagon;
         private readonly WagonEnhancementData _data;
+        private readonly HashSet<LogisticsRequester> _assignedBuffer = new HashSet<LogisticsRequester>();
 
         private const int PriorityModifier = 2;
         // Short cooldown so wagons claim camp-zone move-out requests FAST —
@@ -88,8 +92,16 @@ namespace ManifestDelivery.Tasks
             if (_data.JustDelivered)
                 return null;
 
+            // Already hauling: don't claim more work for a busy wagon.
+            if (ClaimHelpers.IsHauling(currentHighestPriorityTask))
+                return null;
+
             // Driver must be present
             if (_wagon.driver.IsNull())
+                return null;
+
+            // Don't stack claims while an earlier one waits for its route.
+            if (!ClaimHelpers.ReadyToClaim(_wagon, _data))
                 return null;
 
             // Cooldown: don't scan every task cycle
@@ -120,25 +132,23 @@ namespace ManifestDelivery.Tasks
             }
             _data.LastCampHaulScanWasEmpty = false;
 
-            // ── Temporarily assign the requester to this wagon ──────────────
+            // ── Claim the source's active requests for this wagon ───────────
             try
             {
-                bestSource.AssignWorker(
-                    _wagon,
-                    LogisticsAssignment.AssignmentCategory.Default,
-                    LogisticsAssignment.AssignmentPriority.Default);
+                _data.ClaimRequester(_wagon, bestSource);
 
-                _data.CampHaulRequester = bestSource;
-
-                string items = DescribeMoveOut(bestSource);
-                float distFromShop = Vector3.Distance(
-                    diagShopPos, bestSource.transform.position);
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] CampHaul CLAIM: {_wagon.name} → " +
-                    $"{bestSource.gameObject.name} " +
-                    $"[{items}] " +
-                    $"({Vector3.Distance(_wagon.transform.position, bestSource.transform.position):F1}u from wagon, " +
-                    $"{distFromShop:F0}u from shop)");
+                if (ManifestDeliveryMod.IsVerbose)
+                {
+                    string items = DescribeMoveOut(bestSource);
+                    float distFromShop = Vector3.Distance(
+                        diagShopPos, bestSource.transform.position);
+                    ManifestDeliveryMod.LogVerbose(
+                        $"[MD] CampHaul CLAIM: {_wagon.name} → " +
+                        $"{bestSource.gameObject.name} " +
+                        $"[{items}] " +
+                        $"({Vector3.Distance(_wagon.transform.position, bestSource.transform.position):F1}u from wagon, " +
+                        $"{distFromShop:F0}u from shop)");
+                }
             }
             catch (System.Exception ex)
             {
@@ -169,6 +179,7 @@ namespace ManifestDelivery.Tasks
 
             LogisticsRequester? bestRequester = null;
             float bestDistSqr = float.MaxValue;
+            var assignedRequesters = ClaimHelpers.CollectAssignedRequesters(_wagon, _assignedBuffer);
 
             foreach (LogisticsRequester requester in aggregator.activeStationaryRequestsRO)
             {
@@ -180,7 +191,7 @@ namespace ManifestDelivery.Tasks
                 if (distSqr > radiusSqr) continue;
 
                 // Skip if wagon is already assigned here
-                if (IsAlreadyAssigned(requester)) continue;
+                if (assignedRequesters.Contains(requester)) continue;
 
                 // Skip storage buildings — camp wagons pick up from PRODUCTION
                 // buildings, not shuffle between storages
@@ -237,24 +248,6 @@ namespace ManifestDelivery.Tasks
             if (request.minItemCountForBulkTransport == 0) return true;
             uint available = request.GetTotalUnreservedCount();
             return available >= request.minItemCountForBulkTransport;
-        }
-
-        /// <summary>
-        /// Returns true when the wagon already has an assignment to this requester.
-        /// </summary>
-        private bool IsAlreadyAssigned(LogisticsRequester requester)
-        {
-            var assigned = _wagon.logisticsAssignment
-                               .GetAssignedRequestsByCategory(
-                                   LogisticsAssignment.AssignmentCategory.Default);
-            if (assigned == null) return false;
-
-            foreach (var kv in assigned)
-            {
-                if (kv.Key.requester == requester)
-                    return true;
-            }
-            return false;
         }
 
     }

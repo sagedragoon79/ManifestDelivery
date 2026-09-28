@@ -7,19 +7,22 @@ namespace ManifestDelivery.Tasks
 {
     /// <summary>
     /// Injected into every TransportWagon's search entry list at priority 1
-    /// (above LogisticsProxy = 0, below CampHaul = 2 and ReturnTrip = 3).
+    /// (below LogisticsProxy = 2, CampHaul = 2 and ReturnTrip = 3).
     ///
-    /// EXECUTION ORDER within a single task-search cycle:
-    ///   KickOut(10) → ReturnTrip(3) → CampHaul(2) → HubHaul(1) → LogisticsProxy(0) → ParkWagon(-10)
+    /// EXECUTION ORDER within a single task-search cycle (see ClaimHelpers):
+    ///   KickOut(10) → ReturnTrip(3) → LogisticsProxy(2) → CampHaul(2) →
+    ///   HubHaul(1) → ParkWagon(-10)
+    /// so LogisticsProxy uses a HubHaul claim on its next search.
     ///
     /// WHAT IT DOES (the proactive Hub distributor):
     ///   When the wagon belongs to a Hub-mode shop and is idle, this entry
     ///   proactively scans EVERY logistics requester within the Hub work radius
     ///   for any building with an active delivery OR move-out request the wagon
     ///   can fulfill — markets, shelters/residences, producers, storages, no
-    ///   building-type filtering. The nearest eligible requester is temporarily
-    ///   assigned to the wagon, then this entry returns null so the game's
-    ///   LogisticsProxySearchEntry creates the real haul task.
+    ///   building-type filtering. The nearest eligible requester's work is
+    ///   claimed for the wagon, then this entry returns null so the game's
+    ///   LogisticsProxySearchEntry creates the real haul task. Claims are
+    ///   released once a route is built (WagonEnhancementData).
     ///
     ///   This is the difference between Hub mode actually distributing goods and
     ///   merely doing opportunistic backhaul. ReturnTrip only fires AFTER a
@@ -39,6 +42,7 @@ namespace ManifestDelivery.Tasks
     {
         private readonly TransportWagon _wagon;
         private readonly WagonEnhancementData _data;
+        private readonly HashSet<LogisticsRequester> _assignedBuffer = new HashSet<LogisticsRequester>();
 
         private const int PriorityModifier = 1;
         private const float ScanCooldown = 1.5f;
@@ -76,8 +80,16 @@ namespace ManifestDelivery.Tasks
             if (_data.JustDelivered)
                 return null;
 
+            // Already hauling: don't claim more work for a busy wagon.
+            if (ClaimHelpers.IsHauling(currentHighestPriorityTask))
+                return null;
+
             // Driver must be present.
             if (_wagon.driver.IsNull())
+                return null;
+
+            // Don't stack claims while an earlier one waits for its route.
+            if (!ClaimHelpers.ReadyToClaim(_wagon, _data))
                 return null;
 
             // Cooldown: don't scan every task cycle.
@@ -125,39 +137,35 @@ namespace ManifestDelivery.Tasks
                     ItemRequest? deliver = GetEligibleDeliverRequest(best);
                     if (deliver == null) return null;  // gate guarantees one; be safe
 
-                    deliver.AssignWorker(
-                        _wagon,
-                        LogisticsAssignment.AssignmentCategory.Default,
-                        LogisticsAssignment.AssignmentPriority.Default);
+                    // hubHerd: counts toward the herd guard until released.
+                    _data.ClaimRequest(_wagon, deliver, hubHerd: true);
 
-                    _data.HubHaulRequest = deliver;
-                    RegisterHubClaim(deliver);  // herd guard bookkeeping
-
-                    string items = DescribeRequests(best);
-                    float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
-                    ManifestDeliveryMod.LogVerbose(
-                        $"[MD] HubHaul CLAIM (multi-source Deliver): {_wagon.name} → " +
-                        $"{best.gameObject.name} [{items}] " +
-                        $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
-                        $"{distFromShop:F0}u from hub)");
+                    if (ManifestDeliveryMod.IsVerbose)
+                    {
+                        string items = DescribeRequests(best);
+                        float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
+                        ManifestDeliveryMod.LogVerbose(
+                            $"[MD] HubHaul CLAIM (multi-source Deliver): {_wagon.name} → " +
+                            $"{best.gameObject.name} [{items}] " +
+                            $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
+                            $"{distFromShop:F0}u from hub)");
+                    }
                 }
                 else
                 {
-                    best.AssignWorker(
-                        _wagon,
-                        LogisticsAssignment.AssignmentCategory.Default,
-                        LogisticsAssignment.AssignmentPriority.Default);
+                    _data.ClaimRequester(_wagon, best);
 
-                    _data.HubHaulRequester = best;
-
-                    string items = DescribeRequests(best);
-                    float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
-                    ManifestDeliveryMod.LogVerbose(
-                        $"[MD] HubHaul CLAIM: {_wagon.name} → " +
-                        $"{best.gameObject.name} " +
-                        $"[{items}] " +
-                        $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
-                        $"{distFromShop:F0}u from hub)");
+                    if (ManifestDeliveryMod.IsVerbose)
+                    {
+                        string items = DescribeRequests(best);
+                        float distFromShop = Vector3.Distance(diagShopPos, best.transform.position);
+                        ManifestDeliveryMod.LogVerbose(
+                            $"[MD] HubHaul CLAIM: {_wagon.name} → " +
+                            $"{best.gameObject.name} " +
+                            $"[{items}] " +
+                            $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
+                            $"{distFromShop:F0}u from hub)");
+                    }
                 }
             }
             catch (System.Exception ex)
@@ -195,6 +203,7 @@ namespace ManifestDelivery.Tasks
 
             LogisticsRequester? bestRequester = null;
             float bestDistSqr = float.MaxValue;
+            var assignedRequesters = ClaimHelpers.CollectAssignedRequesters(_wagon, _assignedBuffer);
 
             foreach (LogisticsRequester requester in aggregator.activeStationaryRequestsRO)
             {
@@ -205,7 +214,7 @@ namespace ManifestDelivery.Tasks
                 if (distSqr > radiusSqr) continue;
 
                 // Skip if this wagon is already assigned here.
-                if (IsAlreadyAssigned(requester)) continue;
+                if (assignedRequesters.Contains(requester)) continue;
 
                 // Any eligible delivery OR move-out request qualifies — no
                 // building-type filtering. Markets, shelters, producers,
@@ -350,21 +359,6 @@ namespace ManifestDelivery.Tasks
                 parts.Add($"{item}×{qty} [out]");
             }
             return parts.Count > 0 ? string.Join(", ", parts.ToArray()) : "nothing";
-        }
-
-        private bool IsAlreadyAssigned(LogisticsRequester requester)
-        {
-            var assigned = _wagon.logisticsAssignment
-                               .GetAssignedRequestsByCategory(
-                                   LogisticsAssignment.AssignmentCategory.Default);
-            if (assigned == null) return false;
-
-            foreach (var kv in assigned)
-            {
-                if (kv.Key.requester == requester)
-                    return true;
-            }
-            return false;
         }
     }
 }

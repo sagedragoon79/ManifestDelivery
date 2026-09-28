@@ -42,6 +42,11 @@ namespace ManifestDelivery.Patches
         private static readonly MethodInfo? _subTasksGetter =
             AccessTools.PropertyGetter(typeof(Task), "subTasks");
 
+        // The same task can reach OnSearchSuccess twice (observed 2026-09-28:
+        // every haul logged twice at the same millisecond), so remember the
+        // last one dumped.
+        private static LogisticsTask? _lastDumped;
+
         private static void Postfix(LogisticsTask __instance)
         {
             try
@@ -50,6 +55,9 @@ namespace ManifestDelivery.Patches
                     return;
                 if (!(__instance.assignedReceiver is TransportWagon wagon) || wagon == null)
                     return;
+                if (ReferenceEquals(__instance, _lastDumped))
+                    return;
+                _lastDumped = __instance;
 
                 IEnumerable? subs = null;
                 if (_subTasksGetter != null)
@@ -79,7 +87,7 @@ namespace ManifestDelivery.Patches
                     foreach (var a in actions)
                     {
                         string item = a.itemID.ToString();
-                        string where = DescribeContainer(a.storageForAction);
+                        string where = DescribeContainer(a.storageForAction) + PriorityTag(a.storageForAction, a.itemID);
 
                         if (a.action == ItemAction.TakeOut)
                         {
@@ -151,7 +159,27 @@ namespace ManifestDelivery.Patches
         private static string ReqTag(ItemRequest r)
         {
             if (r == null) return "";
-            return $"   [maxTrips={r.maxTripsPerQuery} maxPerTrip={r.maxItemCountPerTrip} bulkMin={r.minItemCountForBulkTransport}]";
+            return $"   [req {r.action} for '{DescribeContainer(r.storageForAction)}' {r.requestTag}" +
+                   $" | maxTrips={r.maxTripsPerQuery} maxPerTrip={r.maxItemCountPerTrip} bulkMin={r.minItemCountForBulkTransport}]";
+        }
+
+        /// <summary>
+        /// " p8" when the building is a storage with a Storage Priorities
+        /// setting that differs from vanilla for this item. Reads the component
+        /// only — never attaches one.
+        /// </summary>
+        private static string PriorityTag(IContainsItems c, ItemID itemID)
+        {
+            try
+            {
+                var owner = OwnerOf(c);
+                if (owner == null) return "";
+                var data = owner.GetComponent<StoragePriorityData>();
+                if (data == null || !data.HasAnyPriority) return "";
+                int p = data.GetPriority((int)itemID);
+                return p == StoragePriorityData.DefaultPriority ? "" : $" p{p}";
+            }
+            catch { return ""; }
         }
 
         private static string LimiterHint(int pickupStops, float loadedWeight, float cap)
@@ -169,17 +197,26 @@ namespace ManifestDelivery.Patches
         /// IContainsItems may be a building MonoBehaviour or a plain ItemStorage.
         /// Mirror DeliveryLogPatches' container-naming so logs read consistently.
         /// </summary>
+        /// <summary>
+        /// Building name plus rounded map position, so two buildings of the same
+        /// type (every stockyard is just "Stockyard") can be told apart.
+        /// </summary>
         private static string DescribeContainer(IContainsItems c)
         {
             if (c == null) return "?";
-            if (c is MonoBehaviour mb && mb != null) return mb.gameObject.name;
-            if (c is ItemStorage st)
-            {
-                var owner = st.reservableItemStorageOwner;
-                if (owner != null) return owner.gameObject.name;
-                return "(storage)";
-            }
-            return c.GetType().Name;
+            var owner = OwnerOf(c);
+            if (owner == null) return c is ItemStorage ? "(storage)" : c.GetType().Name;
+            Vector3 p = owner.transform.position;
+            return $"{owner.gameObject.name}@{p.x:F0},{p.z:F0}";
+        }
+
+        private static Component? OwnerOf(IContainsItems c)
+        {
+            if (c == null) return null;
+            if (c is MonoBehaviour mb && mb != null) return mb;
+            if (c is ItemStorage st && st.reservableItemStorageOwner is Component owner && owner != null)
+                return owner;
+            return null;
         }
     }
 }

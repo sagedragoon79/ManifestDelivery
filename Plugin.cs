@@ -48,8 +48,58 @@ namespace ManifestDelivery
         public static KeyCode StatsReportKey_Resolved => _statsReportKey;
 
         // ── Resolved keybind (parsed from ModeCycleKeyName) ──────────────────
+        // Supports modifier combos like "Shift+M". The whole combo must match
+        // exactly, so Ctrl+Shift+M (the stats report) doesn't also fire M.
         private static KeyCode _modeCycleKey = KeyCode.M;
+        private static bool _modeCycleShift, _modeCycleCtrl, _modeCycleAlt;
         public static KeyCode ModeCycleKey => _modeCycleKey;
+
+        /// <summary>
+        /// True on the frame the mode-cycle combo is pressed: the key, with
+        /// exactly the configured modifiers, while no text field has focus.
+        /// </summary>
+        public static bool ModeCycleKeyPressed()
+        {
+            if (!Input.GetKeyDown(_modeCycleKey)) return false;
+            bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+            bool ctrl  = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool alt   = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+            if (shift != _modeCycleShift || ctrl != _modeCycleCtrl || alt != _modeCycleAlt) return false;
+            return !IsTypingInTextField();
+        }
+
+        private static bool IsTypingInTextField()
+        {
+            var selected = UnityEngine.EventSystems.EventSystem.current?.currentSelectedGameObject;
+            if (selected == null) return false;
+            var tmp = selected.GetComponent<TMPro.TMP_InputField>();
+            if (tmp != null && tmp.isFocused) return true;
+            var legacy = selected.GetComponent<UnityEngine.UI.InputField>();
+            return legacy != null && legacy.isFocused;
+        }
+
+        /// <summary>
+        /// Parses "M", "Shift+M", "Ctrl+Alt+F8" and similar. Returns false when
+        /// the key part isn't a Unity KeyCode name.
+        /// </summary>
+        private static bool TryParseKeyCombo(string raw, out KeyCode key, out bool shift, out bool ctrl, out bool alt)
+        {
+            key = KeyCode.None; shift = ctrl = alt = false;
+            if (string.IsNullOrEmpty(raw)) return false;
+            var parts = raw.Split('+');
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                switch (parts[i].Trim().ToLowerInvariant())
+                {
+                    case "shift":                 shift = true; break;
+                    case "ctrl": case "control":  ctrl  = true; break;
+                    case "alt":                   alt   = true; break;
+                    default: return false;
+                }
+            }
+            return System.Enum.TryParse(parts[parts.Length - 1].Trim(), ignoreCase: true, out key)
+                   && key != KeyCode.None;
+        }
 
         // ── Verbose logging toggle ────────────────────────────────────────────
         public static MelonPreferences_Entry<bool> VerboseLogging { get; private set; } = null!;
@@ -60,8 +110,6 @@ namespace ManifestDelivery
         // ── Storage priorities (see _handoffs/…storage-priorities-fold.md) ────
         public static MelonPreferences_Entry<bool>   StoragePriorityEnabled  { get; private set; } = null!;
         public static MelonPreferences_Entry<float>  StoragePriorityStrength { get; private set; } = null!;
-        public static MelonPreferences_Entry<string> StoragePriorityCycleKey { get; private set; } = null!;
-        private static KeyCode _storagePriorityCycleKey = KeyCode.K;
 
         // ── Logger shortcut used throughout the mod ───────────────────────────
         public static MelonLogger.Instance Log => Instance.LoggerInstance;
@@ -76,6 +124,13 @@ namespace ManifestDelivery
             if (VerboseLogging != null && VerboseLogging.Value)
                 Instance.LoggerInstance.Msg(message);
         }
+
+        /// <summary>
+        /// Guard for verbose lines that are costly to build (string formatting,
+        /// request walks). LogVerbose alone still builds its argument when
+        /// verbose logging is off.
+        /// </summary>
+        public static bool IsVerbose => VerboseLogging != null && VerboseLogging.Value;
 
         public override void OnInitializeMelon()
         {
@@ -119,32 +174,23 @@ namespace ManifestDelivery
             StoragePriorityEnabled = cat.CreateEntry(
                 "StoragePriorityEnabled", false,
                 display_name: "Storage Priorities (experimental)",
-                description:  "EXPERIMENTAL. Lets you mark a storage as Preferred or Last Resort " +
-                              "so haulers route deliveries there first (or avoid it until others " +
-                              "fill). Affects DESTINATION choice only — it never makes a storage " +
-                              "attractive to empty, so it cannot ping-pong goods between " +
-                              "storages. Default off.");
+                description:  "EXPERIMENTAL. Adds a 1-9 hauling priority to storage buildings " +
+                              "(9 highest, 5 = vanilla), set for the whole storage or per item " +
+                              "from the building window. Haulers deliver to higher-priority " +
+                              "storages first. Affects DESTINATION choice only — it never makes " +
+                              "a storage attractive to empty, so it cannot ping-pong goods " +
+                              "between storages. Default off.");
 
             StoragePriorityStrength = cat.CreateEntry(
                 "StoragePriorityStrength", 150f,
                 display_name: "Storage Priority — Strength",
-                description:  "How hard a priority pulls, in routing score points. Calibration: " +
-                              "vanilla score is 0-100 (emptier ranks higher) and distance " +
-                              "subtracts ~1 point per world unit, so 150 outweighs a full-vs-" +
-                              "empty swing plus ~50u of extra travel. Granary/Root Cellar/" +
-                              "Treasury carry a built-in +100, so exceed that to out-rank them. " +
-                              "Lower values just break ties; higher values almost always win. " +
-                              "Preferred is automatically tapered as the storage fills.");
-
-            StoragePriorityCycleKey = cat.CreateEntry(
-                "StoragePriorityCycleKey", "K",
-                display_name: "Storage Priority — Cycle Key",
-                description:  "TEMPORARY (until the in-window UI lands): with a storage building " +
-                              "selected, press this key to cycle its priority " +
-                              "Unset → Preferred → Normal → Last Resort. Unity KeyCode name.");
-
-            if (System.Enum.TryParse(StoragePriorityCycleKey.Value, ignoreCase: true, out KeyCode spKey))
-                _storagePriorityCycleKey = spKey;
+                description:  "How hard priority pulls, in routing score points: priority 9 adds " +
+                              "this much, 1 subtracts it, and each step from 5 is a quarter of " +
+                              "it. Calibration: vanilla score is 0-100 (emptier ranks higher) and " +
+                              "distance subtracts ~1 point per world unit, so at 150 a priority-9 " +
+                              "storage wins over an equally full one ~150u closer. Granary/Root " +
+                              "Cellar/Treasury carry a built-in +100. Priorities above 5 fade " +
+                              "automatically as the storage fills.");
 
             // ── Return-trip settings ─────────────────────────────────────────
             ReturnTripEnabled = cat.CreateEntry(
@@ -249,14 +295,19 @@ namespace ManifestDelivery
                 "ModeCycleKey", "M",
                 display_name: "Mode Cycle Key",
                 description:  "While a Wagon Shop's info window is open, press this key to " +
-                              "cycle between Standard / Camp / Hub modes. Use Unity KeyCode " +
-                              "name (e.g. M, F, Tab).");
+                              "cycle between Standard / Camp / Hub modes. A Unity KeyCode " +
+                              "name, optionally with modifiers (e.g. M, Shift+M, Ctrl+F8).");
 
-            // Parse keybind; fall back to M on failure.
-            if (System.Enum.TryParse(ModeCycleKeyName.Value, ignoreCase: true, out KeyCode parsed))
+            // Parse keybind; fall back to plain M on failure.
+            if (TryParseKeyCombo(ModeCycleKeyName.Value, out KeyCode parsed,
+                    out _modeCycleShift, out _modeCycleCtrl, out _modeCycleAlt))
                 _modeCycleKey = parsed;
             else
+            {
+                _modeCycleKey = KeyCode.M;
+                _modeCycleShift = _modeCycleCtrl = _modeCycleAlt = false;
                 LoggerInstance.Warning($"[MD] Could not parse ModeCycleKey \"{ModeCycleKeyName.Value}\", defaulting to M.");
+            }
 
             // ── Per-shop hauling stats ───────────────────────────────────────
             StatsEnabled = cat.CreateEntry(
@@ -287,6 +338,8 @@ namespace ManifestDelivery
             // pattern (attribute-based patch on UIBuildingInfoWindow had
             // silent-failure issues).
             Patches.ModeButtonPatches.Register(HarmonyInstance);
+            Patches.SaveHooks.Register(HarmonyInstance);
+            Patches.StoragePriorityUIPatches.Register(HarmonyInstance);
             Patches.WagonSelectButtonPatches.Register(HarmonyInstance);
             Patches.WagonShopAwakePrefix.Register(HarmonyInstance);
 
@@ -316,6 +369,7 @@ namespace ManifestDelivery
             // Storage-priority caches key on instance IDs / bucket refs, which
             // don't survive a map reload; the store reloads per save.
             ManifestDelivery.Patches.StoragePriorityPatches.ClearCaches();
+            ManifestDelivery.Patches.StoragePriorityUIPatches.ClearCaches();
             ManifestDelivery.Systems.StoragePriorityStore.Clear();
 
             // Stats are per-save: drop in-memory snapshot so the next
@@ -326,11 +380,6 @@ namespace ManifestDelivery
 
         public override void OnUpdate()
         {
-            // Storage priorities: temporary set-tier hotkey until the M2 UI
-            // lands. Components attach lazily on the logistics path — there is
-            // deliberately no periodic sweep here (one caused a visible hitch).
-            HandleStoragePriorityHotkey();
-
             // Stats report keybind: CTRL+SHIFT+<configured key>
             if (StatsEnabled != null && StatsEnabled.Value
                 && Input.GetKeyDown(_statsReportKey)
@@ -338,31 +387,6 @@ namespace ManifestDelivery
                 && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)))
             {
                 ManifestDelivery.Systems.StatsTracker.DumpReportToLog();
-            }
-        }
-
-        /// <summary>
-        /// TEMPORARY input path for storage priorities until the M2 in-window UI
-        /// exists: cycles the tier of whichever storage building is selected.
-        /// Iterating live components (a small set) avoids needing the game's
-        /// selection manager.
-        /// </summary>
-        private static void HandleStoragePriorityHotkey()
-        {
-            if (StoragePriorityEnabled == null || !StoragePriorityEnabled.Value) return;
-            if (!Input.GetKeyDown(_storagePriorityCycleKey)) return;
-
-            try
-            {
-                var data = Patches.StoragePrioritySelection.FindSelected();
-                if (data == null) return;
-
-                var tier = data.CycleDefaultTier();
-                Log.Msg($"[MD][StoragePri] '{data.gameObject.name}' → {tier}");
-            }
-            catch (System.Exception ex)
-            {
-                Log.Warning($"[MD][StoragePri] Cycle hotkey failed: {ex.Message}");
             }
         }
 

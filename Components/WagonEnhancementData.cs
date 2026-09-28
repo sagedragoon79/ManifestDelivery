@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using ManifestDelivery;
 
@@ -18,16 +19,98 @@ namespace ManifestDelivery.Components
         /// </summary>
         public bool JustDelivered { get; set; }
 
-        /// <summary>World-space position of the most-recent delivery.</summary>
-        public Vector3 LastDeliveryPosition { get; set; }
+        // ── MD work claims ────────────────────────────────────────────────────
+        //
+        // MD steers a wagon by assigning it to specific requests just before
+        // vanilla's LogisticsProxy search runs. Only that search reads
+        // assignments (LogisticsGlobalTaskSearch.HasValidRequests /
+        // ProcessRequestsAssignedToWorker), so a claim has done its job once a
+        // route is built — or once the wagon gives up and parks. Unassigning
+        // never cancels a task that is already underway.
+        //
+        // Claims are per REQUEST, never per requester. LogisticsRequester.
+        // AssignWorker also attaches every request the building creates later,
+        // and its UnassignWorker strips assignments vanilla made itself (every
+        // available wagon is assigned to every storage's quota requests). The
+        // old per-requester claims were overwritten without being released, so
+        // wagons stayed tied to most buildings they ever claimed.
+
+        private readonly List<ItemRequest> _claims = new List<ItemRequest>();
+        private readonly HashSet<ItemRequest> _hubHerdClaims = new HashSet<ItemRequest>();
+
+        /// <summary>True while MD holds claims that no route has used yet.</summary>
+        public bool HasClaims => _claims.Count > 0;
+
+        /// <summary>Time.time of the most recent claim, for stale-claim cleanup.</summary>
+        public float ClaimTime { get; private set; }
 
         /// <summary>
-        /// The requester that was temporarily assigned to this wagon during a
-        /// return-trip search.  Stored so we can clean up the assignment if the
-        /// wagon ultimately parks without executing any logistics work (e.g. the
-        /// request was filled by someone else first).
+        /// Assigns the wagon to one request. Returns false, without claiming,
+        /// when the wagon is already assigned to it — so a later release never
+        /// removes an assignment MD didn't make. <paramref name="hubHerd"/>
+        /// also counts the claim in HubHaul's per-request herd guard.
         /// </summary>
-        public LogisticsRequester? TemporaryRequester { get; set; }
+        public bool ClaimRequest(TransportWagon wagon, ItemRequest request, bool hubHerd = false)
+        {
+            if (wagon == null || request == null) return false;
+            if (wagon.logisticsAssignment.GetAssignedPriorityForRequest(
+                    request, LogisticsAssignment.AssignmentCategory.Default, out _))
+                return false;
+
+            request.AssignWorker(wagon,
+                LogisticsAssignment.AssignmentCategory.Default,
+                LogisticsAssignment.AssignmentPriority.Default);
+            _claims.Add(request);
+            if (hubHerd && _hubHerdClaims.Add(request))
+                Tasks.HubHaulSearchEntry.RegisterHubClaim(request);
+            ClaimTime = Time.time;
+            return true;
+        }
+
+        /// <summary>Claims every active delivery and move-out request on a building, one by one.</summary>
+        public int ClaimRequester(TransportWagon wagon, LogisticsRequester requester)
+        {
+            if (requester == null) return 0;
+            int claimed = 0;
+            foreach (var kv in requester.activeDeliveryRequests)
+                if (ClaimRequest(wagon, kv.Value)) claimed++;
+            foreach (var kv in requester.activeMoveOutRequests)
+                if (ClaimRequest(wagon, kv.Value)) claimed++;
+            return claimed;
+        }
+
+        /// <summary>Releases every claim MD holds on this wagon. Safe to call at any time.</summary>
+        public void ReleaseClaims(TransportWagon? wagon, string reason)
+        {
+            if (_claims.Count == 0) return;
+            int released = _claims.Count;
+            foreach (var request in _claims)
+            {
+                if (request == null) continue;
+                if (_hubHerdClaims.Contains(request))
+                    Tasks.HubHaulSearchEntry.ReleaseHubClaim(request);
+                if (wagon == null) continue;
+                try
+                {
+                    request.UnassignWorker(wagon, LogisticsAssignment.AssignmentCategory.Default);
+                }
+                catch (System.Exception ex)
+                {
+                    ManifestDeliveryMod.Log.Warning(
+                        $"[MD] Releasing a claim failed for {wagon.name}: {ex.Message}");
+                }
+            }
+            _claims.Clear();
+            _hubHerdClaims.Clear();
+            ManifestDeliveryMod.LogVerbose(
+                $"[MD] {(wagon != null ? wagon.name : "wagon")}: released {released} claim(s) ({reason}).");
+        }
+
+        private void OnDestroy()
+        {
+            try { ReleaseClaims(GetComponent<TransportWagon>(), "wagon destroyed"); }
+            catch { /* scene teardown — requests are going away too */ }
+        }
 
         // ── Shop-mode cache ───────────────────────────────────────────────────
 
@@ -74,34 +157,6 @@ namespace ManifestDelivery.Components
         /// </summary>
         public bool LastCampHaulScanWasEmpty { get; set; }
 
-        /// <summary>
-        /// The requester assigned during a camp haul search.
-        /// Stored for cleanup if the wagon parks without executing.
-        /// </summary>
-        public LogisticsRequester? CampHaulRequester { get; set; }
-
-        /// <summary>
-        /// Cleans up a camp haul assignment if one is pending.
-        /// </summary>
-        public void ClearCampHaulAssignment(TransportWagon wagon)
-        {
-            if (CampHaulRequester == null) return;
-
-            try
-            {
-                CampHaulRequester.UnassignWorker(
-                    wagon,
-                    LogisticsAssignment.AssignmentCategory.Default);
-            }
-            catch (System.Exception ex)
-            {
-                ManifestDeliveryMod.Log.Warning(
-                    $"[MD] ClearCampHaulAssignment failed for {wagon?.name}: {ex.Message}");
-            }
-
-            CampHaulRequester = null;
-        }
-
         // ── Hub haul state ────────────────────────────────────────────────────
 
         /// <summary>
@@ -115,59 +170,6 @@ namespace ManifestDelivery.Components
         /// Throttles the "HubHaul EMPTY" log line to state transitions only.
         /// </summary>
         public bool LastHubHaulScanWasEmpty { get; set; }
-
-        /// <summary>
-        /// The requester assigned during a hub haul search (legacy / non-multi-
-        /// source path). Stored for cleanup if the wagon parks without executing.
-        /// </summary>
-        public LogisticsRequester? HubHaulRequester { get; set; }
-
-        /// <summary>
-        /// The specific DELIVER request claimed during a multi-source hub haul.
-        /// Stored separately from HubHaulRequester because it's torn down via the
-        /// per-request LogisticsRequest.UnassignWorker, not the requester overload.
-        /// </summary>
-        public ItemRequest? HubHaulRequest { get; set; }
-
-        /// <summary>
-        /// Cleans up a hub haul assignment if one is pending — handles both the
-        /// per-request (multi-source) claim and the legacy per-requester claim.
-        /// </summary>
-        public void ClearHubHaulAssignment(TransportWagon wagon)
-        {
-            if (HubHaulRequest != null)
-            {
-                ManifestDelivery.Tasks.HubHaulSearchEntry.ReleaseHubClaim(HubHaulRequest);
-                try
-                {
-                    HubHaulRequest.UnassignWorker(
-                        wagon,
-                        LogisticsAssignment.AssignmentCategory.Default);
-                }
-                catch (System.Exception ex)
-                {
-                    ManifestDeliveryMod.Log.Warning(
-                        $"[MD] ClearHubHaulAssignment (request) failed for {wagon?.name}: {ex.Message}");
-                }
-                HubHaulRequest = null;
-            }
-
-            if (HubHaulRequester == null) return;
-
-            try
-            {
-                HubHaulRequester.UnassignWorker(
-                    wagon,
-                    LogisticsAssignment.AssignmentCategory.Default);
-            }
-            catch (System.Exception ex)
-            {
-                ManifestDeliveryMod.Log.Warning(
-                    $"[MD] ClearHubHaulAssignment failed for {wagon?.name}: {ex.Message}");
-            }
-
-            HubHaulRequester = null;
-        }
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -201,28 +203,5 @@ namespace ManifestDelivery.Components
                     _             => ManifestDeliveryMod.MaxWagonsStandard.Value,
                 };
 
-        /// <summary>
-        /// Cleans up a temporary requester assignment if one is pending.
-        /// Safe to call even when TemporaryRequester is null.
-        /// </summary>
-        public void ClearTemporaryAssignment(TransportWagon wagon)
-        {
-            if (TemporaryRequester == null) return;
-
-            try
-            {
-                TemporaryRequester.UnassignWorker(
-                    wagon,
-                    LogisticsAssignment.AssignmentCategory.Default);
-            }
-            catch (System.Exception ex)
-            {
-                ManifestDeliveryMod.Log.Warning(
-                    $"[MD] ClearTemporaryAssignment failed for wagon " +
-                    $"{wagon?.name}: {ex.Message}");
-            }
-
-            TemporaryRequester = null;
-        }
     }
 }

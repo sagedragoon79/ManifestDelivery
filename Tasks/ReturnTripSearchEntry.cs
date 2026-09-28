@@ -7,17 +7,18 @@ namespace ManifestDelivery.Tasks
 {
     /// <summary>
     /// Injected into every TransportWagon's search entry list at priority 3
-    /// (above LogisticsProxy = 0, below KickOutAroundThreat = 10).
+    /// (above LogisticsProxy = 2, below KickOutAroundThreat = 10).
     ///
-    /// EXECUTION ORDER within a single task-search cycle:
-    ///   KickOut(10) → ReturnTrip(3) → LogisticsProxy(0) → ParkWagon(-10)
+    /// EXECUTION ORDER within a single task-search cycle (see ClaimHelpers):
+    ///   KickOut(10) → ReturnTrip(3) → LogisticsProxy(2) → CampHaul(2) →
+    ///   HubHaul(1) → ParkWagon(-10)
     ///
     /// WHAT IT DOES:
     ///   When a wagon just completed a delivery (JustDelivered flag is set),
     ///   this entry scans active stationary requesters within a configurable
     ///   radius of the wagon's current world position.  The nearest eligible
-    ///   requester is temporarily assigned to the wagon, then this entry returns
-    ///   null so the search continues.  LogisticsProxy fires next, finds the
+    ///   requester's active requests are claimed for the wagon, then this
+    ///   entry returns null so the search continues.  LogisticsProxy fires next, finds the
     ///   newly-assigned requests, and returns a real logistics task — the wagon
     ///   never parks.
     ///
@@ -25,17 +26,17 @@ namespace ManifestDelivery.Tasks
     ///   entry is a no-op and the wagon parks normally.
     ///
     /// CLEAN-UP:
-    ///   The temporary assignment is stored in WagonEnhancementData.
-    ///   TransportWagonPatches clears it either when the logistics task actually
-    ///   starts (success) or when ParkWagonThenIdleSubTask begins (failure —
-    ///   nothing was close enough to make a trip worthwhile).
+    ///   Claims are tracked in WagonEnhancementData and released when a route
+    ///   is built, when the wagon parks, on mode change, or when they go stale
+    ///   (see WagonEnhancementData.ReleaseClaims).
     /// </summary>
     public class ReturnTripSearchEntry : TaskSearchEntry
     {
         private readonly TransportWagon _wagon;
         private readonly WagonEnhancementData _data;
+        private readonly HashSet<LogisticsRequester> _assignedBuffer = new HashSet<LogisticsRequester>();
 
-        // Priority modifier higher than LogisticsProxy (0) ensures this entry
+        // Priority modifier higher than LogisticsProxy (2) ensures this entry
         // fires first in the same search cycle.
         private const int PriorityModifier = 3;
 
@@ -88,8 +89,19 @@ namespace ManifestDelivery.Tasks
             if (!_data.JustDelivered)
                 return null;
 
+            // Every drop-off of a multi-stop route sets JustDelivered. Wait
+            // until the haul is over: the final drop-off sets it again, and
+            // that's when a return trip matters. (Claiming mid-route piled up
+            // claims the wagon never used.)
+            if (ClaimHelpers.IsHauling(currentHighestPriorityTask))
+                return null;
+
             // Driver must still be inside the wagon.
             if (_wagon.driver.IsNull())
+                return null;
+
+            // Don't stack claims; retry next tick while an earlier one is pending.
+            if (!ClaimHelpers.ReadyToClaim(_wagon, _data))
                 return null;
 
             // Lazy-resolve shop link so Camp/Hub search-center anchoring works
@@ -132,32 +144,30 @@ namespace ManifestDelivery.Tasks
                 return null;   // nothing nearby → fall through to ParkWagon
             }
 
-            // ── Temporarily assign the requester to this wagon ────────────────
-            //    LogisticsRequester.AssignWorker propagates the assignment to
-            //    every active request on that requester, making them visible to
-            //    the LogisticsProxySearchEntry that fires next.
+            // ── Claim the requester's active requests for this wagon ─────────
+            //    Per request, not per requester (see WagonEnhancementData), so
+            //    they become visible to the LogisticsProxySearchEntry that fires
+            //    next and are released once it builds a route.
             try
             {
-                best.AssignWorker(
-                    _wagon,
-                    LogisticsAssignment.AssignmentCategory.Default,
-                    LogisticsAssignment.AssignmentPriority.Default);
+                _data.ClaimRequester(_wagon, best);
 
-                _data.TemporaryRequester = best;
-
-                string items = DescribeMoveOut(best);
-                float distFromShop = diagShopAnchored
-                    ? Vector3.Distance(diagCenter, best.transform.position)
-                    : -1f;
-                string shopDistStr = distFromShop >= 0f
-                    ? $", {distFromShop:F0}u from shop"
-                    : "";
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] ReturnTrip CLAIM ({diagMode}): {_wagon.name} → " +
-                    $"{best.gameObject.name} " +
-                    $"[{items}] " +
-                    $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon" +
-                    $"{shopDistStr})");
+                if (ManifestDeliveryMod.IsVerbose)
+                {
+                    string items = DescribeMoveOut(best);
+                    float distFromShop = diagShopAnchored
+                        ? Vector3.Distance(diagCenter, best.transform.position)
+                        : -1f;
+                    string shopDistStr = distFromShop >= 0f
+                        ? $", {distFromShop:F0}u from shop"
+                        : "";
+                    ManifestDeliveryMod.LogVerbose(
+                        $"[MD] ReturnTrip CLAIM ({diagMode}): {_wagon.name} → " +
+                        $"{best.gameObject.name} " +
+                        $"[{items}] " +
+                        $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon" +
+                        $"{shopDistStr})");
+                }
             }
             catch (System.Exception ex)
             {
@@ -246,19 +256,20 @@ namespace ManifestDelivery.Tasks
             float bestDistSqr = float.MaxValue;
             LogisticsRequester? bestWorkshop = null;
             float bestWorkshopDistSqr = float.MaxValue;
+            var assignedRequesters = ClaimHelpers.CollectAssignedRequesters(_wagon, _assignedBuffer);
 
             foreach (LogisticsRequester requester in aggregator.activeStationaryRequestsRO)
             {
                 // Skip requesters that have no active work left.
                 if (!requester.hasActiveRequests) continue;
 
-                // Skip if the wagon is already assigned to this requester
-                // (would create a duplicate assignment).
-                if (IsAlreadyAssigned(requester)) continue;
-
                 // Distance filter — measured from search center (shop in Camp, wagon otherwise).
                 float distSqr = (requester.transform.position - searchCenter).sqrMagnitude;
                 if (distSqr > radiusSqr) continue;
+
+                // Skip if the wagon is already assigned to this requester —
+                // vanilla already routes the wagon there (storage quota work).
+                if (assignedRequesters.Contains(requester)) continue;
 
                 // Check that at least one active request is eligible.
                 // In Camp mode, we prioritize firewood + food backhauls to camp residences
@@ -359,27 +370,6 @@ namespace ManifestDelivery.Tasks
                         return true;
                 }
                 t = t.parent;
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// Returns true when the wagon already has a Default-category assignment
-        /// to this requester (checked via the wagon's LogisticsAssignment component).
-        /// </summary>
-        private bool IsAlreadyAssigned(LogisticsRequester requester)
-        {
-            var assigned = _wagon.logisticsAssignment
-                               .GetAssignedRequestsByCategory(
-                                   LogisticsAssignment.AssignmentCategory.Default);
-            if (assigned == null) return false;
-
-            // Iterate the wagon's assigned requests and check whether any
-            // belong to this requester.
-            foreach (var kv in assigned)
-            {
-                if (kv.Key.requester == requester)
-                    return true;
             }
             return false;
         }

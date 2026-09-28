@@ -10,16 +10,19 @@ namespace ManifestDelivery.Systems
     /// doing vs how much finished-goods movement.
     ///
     /// Edge calls:
-    ///   • Firewood → Produced (chopped from logs at the Sawpit/Woodcutter)
-    ///   • Salt → Raw (mined or evaporated, no workshop step)
-    ///   • Honey/Beeswax → Raw (Apiary harvests them as-is)
-    ///   • Hide → Raw (a butcher byproduct, not a craft)
-    ///   • Cloth → Produced (woven from Wool at the Tailor)
-    ///   • Charcoal → Produced (Charcoal Kiln)
+    ///   • Firewood → Produced (chopped from logs at the Woodcutter)
+    ///   • Iron → Produced (an ingot from the Smelter; IronOre is the raw item)
+    ///   • Honey/Wax → Raw (the Apiary harvests them as-is)
+    ///   • Hide/Tallow → Raw (butchering byproducts, not crafts)
+    ///   • Carcasses → Raw (hunting output before the butcher)
     ///
     /// Names are resolved against ItemID at startup via Enum.TryParse so a
     /// game patch that adds/renames items doesn't crash this code — unknown
     /// names are silently dropped. Tweak the list and rebuild.
+    ///
+    /// The list uses the game's real ItemID names (checked against the enum
+    /// 2026-09-28). An earlier list guessed names like "Wheat" and "Carrot",
+    /// so Grain, RootVegetable, Greens, Fruit and others counted as produced.
     /// </summary>
     internal static class ItemCategoryClassifier
     {
@@ -27,29 +30,29 @@ namespace ManifestDelivery.Systems
         // a craft step. Anything not here is treated as PRODUCED.
         private static readonly string[] RawItemNames = new[]
         {
-            // Mineral / quarry
-            "Stone", "Coal", "Sand", "Clay", "IronOre", "GoldOre", "Iron", "Gold",
-            "Salt", "Saltpeter", "Sulfur", "Crystal", "Gemstone",
+            // Mineral / quarry / well
+            "Stone", "Coal", "Sand", "Clay", "IronOre", "GoldOre", "Water",
 
-            // Forestry / logs
-            "Wood", "Logs", "Log", "RawWood",
+            // Forestry
+            "Logs", "Willow",
 
-            // Crops (raw produce — Mill/Bakery turn them into produced goods)
-            "Wheat", "Carrot", "Onion", "Cabbage", "Beans", "Bean",
-            "Flax", "Pea", "Peas", "Leek", "Turnip", "Squash", "Pumpkin",
-            "Potato", "Potatoes", "Apple", "Apples", "Pear", "Pears",
-            "Hops", "Barley", "Rye", "Hay", "Straw",
+            // Crops (raw produce — Mill/Bakery etc. turn them into produced goods)
+            "Grain", "RootVegetable", "Beans", "Greens", "Fruit", "Flax", "Hay", "Clover",
 
-            // Foraged
-            "Berries", "Berry", "Mushrooms", "Mushroom", "Herbs", "Herb",
-            "Honey", "Beeswax",
+            // Foraged / apiary
+            "Berries", "Mushroom", "Roots", "Nuts", "Herbs", "Honey", "Wax",
 
-            // Animal byproducts (raw — Smokehouse/Tannery process these)
-            "RawMeat", "Meat", "RawFish", "Fish", "RawHide", "Hide", "Pelt",
-            "Tallow", "Wool", "Milk", "Eggs", "Egg",
+            // Animal (raw — Smokehouse/Tannery/Butcher process these)
+            "Meat", "Fish", "Hide", "Tallow", "Eggs", "Milk",
+            "Carcass", "BoarCarcass", "SmallCarcass", "WolfCarcass",
+            "HealthyCarcass", "UnhealthyCarcass", "SicklyCarcass",
 
-            // Fertilizer / compost (raw inputs to fields)
-            "Compost", "Manure", "Fertilizer",
+            // Fertilizer inputs
+            "Poop", "Compost",
+
+            // Mod items, resolved when the mod that adds them is installed
+            // (LiveStockMarket's Wool); dropped silently otherwise.
+            "Wool",
         };
 
         // Resolved at first use via reflection on FF's ItemID enum.

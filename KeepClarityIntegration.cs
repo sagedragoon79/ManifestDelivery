@@ -154,12 +154,29 @@ namespace ManifestDelivery
                 NewMeta("Relocation Speed Multiplier", min: 0.5f, max: 5.0f,
                     tooltip: "How fast the cart 'drives' itself to a rally point"));
 
+            // === Storage Priorities ===
+            // Live: the routing postfix reads both on every score, and the
+            // window rows re-check the toggle each time a window opens.
+            Reg("Storage Priorities", ManifestDeliveryMod.StoragePriorityEnabled,
+                NewMeta("Storage Priorities (experimental)",
+                    "Adds a 1-9 hauling priority to storage buildings (9 highest, 5 = vanilla). " +
+                    "Set it for the whole storage in the building window, or per item by clicking " +
+                    "an item's icon. Haulers deliver to higher-priority storages first. It only " +
+                    "chooses where goods go, never pulls them back out, so goods can't bounce " +
+                    "between storages."));
+            Reg("Storage Priorities", ManifestDeliveryMod.StoragePriorityStrength,
+                NewMeta("Priority Strength", min: 25f, max: 400f,
+                    tooltip: "Routing points that priority 9 adds and priority 1 subtracts; each step " +
+                             "from 5 is a quarter of this. About 1 point per unit of travel. Default 150.",
+                    visibleWhen: () => ManifestDeliveryMod.StoragePriorityEnabled.Value));
+
             // === Hotkeys ===
             // restartRequired: the key string is parsed into _modeCycleKey once
             // in OnInitializeMelon; the resolved KeyCode is what's read live.
             Reg("Hotkeys", ManifestDeliveryMod.ModeCycleKeyName,
                 NewMeta("Cycle Wagon Shop Mode", restartRequired: true,
-                    tooltip: "Unity KeyCode name. Cycles Standard / Camp / Hub while a Wagon Shop is selected."));
+                    tooltip: "A Unity KeyCode name, optionally with modifiers (M, Shift+M, Ctrl+F8). " +
+                             "Cycles Standard / Camp / Hub while a Wagon Shop is selected."));
 
             // === Diagnostics ===
             // Live — the pref is re-read on every wagon haul build (OnSearchSuccess).

@@ -5,6 +5,59 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Storage Priorities (experimental, off by default).** Give storage buildings
+  a hauling priority from 1 to 9 (9 highest, 5 = vanilla), the same scale as
+  Tended Wilds' forager priorities. Haulers deliver to higher-priority storages
+  first, and use storages below 5 only when others are full or much farther
+  away.
+  - Set a priority for the whole storage at the top of its storage section, or
+    for one item by clicking that item's icon (the row sits under the Storage
+    Limits quotas). **Default** makes an item follow the storage-wide priority.
+  - Item icons show ▲ (above 5) or ▼ (below 5); faded means the item follows
+    the storage-wide priority. Hover an icon for the exact number.
+  - Priority only chooses where goods go. It never pulls goods back out of a
+    storage, so goods can't bounce between storages.
+  - Turn it on in Keep Clarity under Manifest Delivery → Storage Priorities,
+    where a Strength slider sets how far haulers will travel for priority.
+  - Saved per settlement, and follows a storage that you relocate.
+  - Inspired by *Storage Priorities* by 3am.
+
+### Fixed
+- **Wagons stayed tied to buildings they claimed long ago.** MD claimed work
+  for wagons even while they were already hauling, and rarely released those
+  claims, so over a session each wagon stayed attached to most buildings it had
+  ever served. After switching a shop from Hub to Camp, for example, its wagons
+  kept serving town until you reloaded. Claims are now made one request at a
+  time and released as soon as a route is planned, or when the wagon parks,
+  changes mode, or leaves its shop.
+- **Hub wagons skipped some restock jobs until you reloaded.** With Hub
+  Multi-Source Pickup on, a claim that didn't lead to a trip was never
+  released, so other Hub wagons treated that job as already covered.
+- **Per-item hauling stats never recorded.** The stats report now includes
+  per-item counts and the raw vs. produced split, which were always zero.
+  Grain, vegetables, fruit, nuts, and other raw goods are now counted as raw,
+  and iron ingots as produced.
+- **Year-to-date stats froze after reloading a save.**
+- **Wagon Shops took each other's wagons on load.** The first shop to load
+  adopted wagons from shops that hadn't finished loading, and those wagons could
+  end up without a driver.
+- **A new town used the previous town's files** for shop modes, stats, and
+  priorities until its first save. Settings you make before a new town's first
+  save are now kept and written under the new town's name.
+- **The mode key misfired.** Key combinations such as `Shift+M` now work, the
+  modifiers must match exactly (so Ctrl+Shift+M, the stats report, no longer
+  also cycles the mode), and the key is ignored while you type in a text field.
+- **Hub's +20% capacity missed newly built wagons** until a mode change or tech
+  unlock.
+- The Hub tooltip now describes what Hub mode does: it serves deliveries and
+  pickups anywhere in its radius, and its wagons help carry water to building
+  fires.
+
+---
+
 ## [1.0.21] — 2026-08-24
 
 ### Fixed

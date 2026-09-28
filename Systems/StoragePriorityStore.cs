@@ -7,7 +7,7 @@ using ManifestDelivery.Components;
 namespace ManifestDelivery.Systems
 {
     /// <summary>
-    /// Per-save persistence for storage priority tiers (M1).
+    /// Per-save persistence for storage priorities (1–9, 9 highest).
     ///
     /// Mirrors MD's proven persistence shape (see <c>WagonShopEnhancement</c> and
     /// <c>StatsTracker</c>): one file per save under
@@ -21,23 +21,23 @@ namespace ManifestDelivery.Systems
     ///   default.txt while reads came from the real file).
     /// - **Position keys losing settings on relocation** → live tiers ride on a
     ///   <see cref="StoragePriorityData"/> component attached to the building, and
-    ///   <see cref="SyncFromLive"/> rebuilds the on-disk map from each building's
-    ///   CURRENT position immediately before writing. A relocated building is
+    ///   <see cref="SyncFromLive"/> merges each building into the on-disk map at
+    ///   its CURRENT position immediately before writing. A relocated building is
     ///   simply saved under its new key.
     ///
     /// Format (one row per building/item, '|' separated):
-    ///   <c>positionKey|itemKey|tier</c>   itemKey -1 = building-wide default.
+    ///   <c>positionKey|itemKey|priority</c>   itemKey -1 = storage-wide priority,
+    ///   priority 1–9.
     /// </summary>
     public static class StoragePriorityStore
     {
         private const string DirName = "ManifestDelivery_StoragePriorities";
 
-        /// <summary>positionKey → (itemKey → tier)</summary>
-        private static readonly Dictionary<int, Dictionary<int, StorageTier>> _byKey =
-            new Dictionary<int, Dictionary<int, StorageTier>>();
+        /// <summary>positionKey → (itemKey → priority 1–9)</summary>
+        private static readonly Dictionary<int, Dictionary<int, int>> _byKey =
+            new Dictionary<int, Dictionary<int, int>>();
 
         private static string _loadedForSave = null!;
-        private static bool _dirty;
 
         /// <summary>
         /// Same hash MD's mode persistence uses: combines rounded X and Z as
@@ -51,7 +51,8 @@ namespace ManifestDelivery.Systems
             unchecked { return (ix * 397) ^ iz; }
         }
 
-        public static void MarkDirty() => _dirty = true;
+        /// <summary>Kept for callers; saving happens on the game's save cadence.</summary>
+        public static void MarkDirty() { }
 
         // ── Load ─────────────────────────────────────────────────────────────
 
@@ -62,7 +63,11 @@ namespace ManifestDelivery.Systems
 
             _loadedForSave = current;
             _byKey.Clear();
-            _dirty = false;
+
+            // A brand-new town has no save name until its first save. Don't read
+            // default.txt for it: its priorities live on the building components
+            // and SaveToDisk writes them under the real name at that first save.
+            if (string.IsNullOrEmpty(current)) return;
 
             string path = GetSaveFilePath(current);
             if (!File.Exists(path)) return;
@@ -77,12 +82,13 @@ namespace ManifestDelivery.Systems
                     if (parts.Length != 3) continue;
                     if (!int.TryParse(parts[0], out int key)) continue;
                     if (!int.TryParse(parts[1], out int itemKey)) continue;
-                    if (!Enum.TryParse(parts[2], out StorageTier tier)) continue;
-                    if (tier == StorageTier.Unset) continue;
+                    if (!int.TryParse(parts[2], out int priority)) continue;
+                    if (priority < StoragePriorityData.MinPriority
+                        || priority > StoragePriorityData.MaxPriority) continue;
 
-                    if (!_byKey.TryGetValue(key, out var tiers))
-                        _byKey[key] = tiers = new Dictionary<int, StorageTier>();
-                    tiers[itemKey] = tier;
+                    if (!_byKey.TryGetValue(key, out var priorities))
+                        _byKey[key] = priorities = new Dictionary<int, int>();
+                    priorities[itemKey] = priority;
                     rows++;
                 }
 
@@ -95,7 +101,7 @@ namespace ManifestDelivery.Systems
             }
         }
 
-        /// <summary>Pushes any saved tiers for this building's position into its component.</summary>
+        /// <summary>Pushes any saved priorities for this building's position into its component.</summary>
         public static void RestoreInto(StoragePriorityData data)
         {
             if (data == null) return;
@@ -104,8 +110,8 @@ namespace ManifestDelivery.Systems
                 EnsureLoadedForCurrentSave();
                 int key = ComputeKey(data.transform.position);
                 data.PersistedKey = key;
-                if (_byKey.TryGetValue(key, out var tiers) && tiers.Count > 0)
-                    data.LoadTiers(tiers);
+                if (_byKey.TryGetValue(key, out var priorities) && priorities.Count > 0)
+                    data.LoadPriorities(priorities);
             }
             catch (Exception ex)
             {
@@ -118,16 +124,16 @@ namespace ManifestDelivery.Systems
         /// <summary>
         /// Folds live components into the on-disk map at their CURRENT positions.
         ///
-        /// Deliberately a MERGE, not a rebuild-from-scratch. Components attach on
-        /// a sweep and restore one frame later, so a save during that window
-        /// would otherwise see "no tiers" on every building and persist an empty
-        /// map over the player's real settings. Only components that have
+        /// Deliberately a MERGE, not a rebuild-from-scratch. Components attach
+        /// lazily and restore one frame later, so a save during that window
+        /// would otherwise see "nothing set" on every building and persist an
+        /// empty map over the player's real settings. Only components that have
         /// actually restored may write, and untouched keys are left alone.
         ///
         /// Handles each case explicitly:
         /// - **Relocated** → its remembered <see cref="StoragePriorityData.PersistedKey"/>
         ///   differs from its current key, so the stale entry is removed.
-        /// - **Cleared to Unset** → its key is removed.
+        /// - **Cleared** (nothing set) → its key is removed.
         /// - **Not yet restored / not yet attached** → skipped, disk entry preserved.
         /// - **Demolished** → entry preserved; a storage later rebuilt on the same
         ///   footprint simply inherits the old priority, which is the friendly
@@ -145,18 +151,18 @@ namespace ManifestDelivery.Systems
                 if (data.PersistedKey != int.MinValue && data.PersistedKey != key)
                     _byKey.Remove(data.PersistedKey);
 
-                if (!data.HasAnyTier)
+                if (!data.HasAnyPriority)
                 {
                     _byKey.Remove(key);
                     data.PersistedKey = key;
                     continue;
                 }
 
-                var tiers = new Dictionary<int, StorageTier>();
-                foreach (var kv in data.TiersRO)
-                    if (kv.Value != StorageTier.Unset) tiers[kv.Key] = kv.Value;
+                var priorities = new Dictionary<int, int>();
+                foreach (var kv in data.PrioritiesRO)
+                    priorities[kv.Key] = kv.Value;
 
-                _byKey[key] = tiers;
+                _byKey[key] = priorities;
                 data.PersistedKey = key;
             }
         }
@@ -172,7 +178,7 @@ namespace ManifestDelivery.Systems
 
                 // Load first, THEN merge. Without this, a save that happens
                 // before the store ever read the file would start from an empty
-                // map and delete the player's existing tiers.
+                // map and delete the player's existing priorities.
                 EnsureLoadedForCurrentSave();
                 SyncFromLive();
 
@@ -184,7 +190,6 @@ namespace ManifestDelivery.Systems
                 if (_byKey.Count == 0)
                 {
                     if (File.Exists(path)) File.Delete(path);
-                    _dirty = false;
                     return;
                 }
 
@@ -195,7 +200,6 @@ namespace ManifestDelivery.Systems
 
                 File.WriteAllLines(path, lines.ToArray());
                 _loadedForSave = current;
-                _dirty = false;
             }
             catch (Exception ex)
             {
@@ -208,7 +212,6 @@ namespace ManifestDelivery.Systems
         {
             _byKey.Clear();
             _loadedForSave = null!;
-            _dirty = false;
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

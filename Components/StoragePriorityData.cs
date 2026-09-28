@@ -5,49 +5,39 @@ using UnityEngine;
 namespace ManifestDelivery.Components
 {
     /// <summary>
-    /// Storage priority ladder. Deliberately short and named rather than a 1–5
-    /// numeric scale: fewer decisions for the player, and it matches the
-    /// Standard/Camp/Hub vocabulary MD already uses in building windows.
-    /// </summary>
-    public enum StorageTier
-    {
-        /// <summary>No opinion — behaves exactly like vanilla.</summary>
-        Unset = 0,
-        /// <summary>Pull deliveries here even from further away.</summary>
-        Preferred = 1,
-        /// <summary>Explicitly vanilla (distinct from Unset only for the UI).</summary>
-        Normal = 2,
-        /// <summary>Avoid until better options are full.</summary>
-        LastResort = 3,
-    }
-
-    /// <summary>
-    /// Per-storage priority state (M1 of the Storage Priorities fold — see
+    /// Per-storage hauling priority (Storage Priorities fold — see
     /// <c>_handoffs/2026-08-21_storage-priorities-fold.md</c>).
     ///
-    /// WHY A COMPONENT, NOT A LOOKUP TABLE: tiers live on the building itself,
-    /// so **relocation is free** — the data physically moves with the
-    /// GameObject. The handoff warned that position keys "silently lose settings
-    /// when a building is relocated"; that trap only bites designs where the
-    /// live data is *keyed* by position. Here position is used solely as the
-    /// on-disk key, written from the building's CURRENT position at save time,
-    /// so a relocated building simply persists under its new key.
+    /// SCALE: 1–9, **9 highest**, default 5 = vanilla. This is the fleet's
+    /// priority convention (Tended Wilds' forager priorities use the same
+    /// 1–9 / default-5 scale), chosen by the user for consistency across mods.
     ///
-    /// (The handoff also suggested keying on "the save GUID / instance identity
-    /// that MD's mode persistence already uses" — that parenthetical is wrong:
-    /// <c>WagonShopEnhancement</c> keys on a position hash. There is no existing
-    /// GUID pattern to copy, hence this approach.)
+    /// TWO LEVELS: a storage-wide priority (<see cref="AllItemsKey"/>) plus
+    /// optional per-item priorities. An item with its own priority uses it;
+    /// every other item follows the storage-wide one. Setting one item never
+    /// changes another.
     ///
-    /// Tiers are stored per item so "grain goes to the granary near the bakery"
-    /// works, with <see cref="AllItemsKey"/> as the building-wide default.
+    /// WHY A COMPONENT, NOT A LOOKUP TABLE: priorities live on the building
+    /// itself, so **relocation is free** — the data physically moves with the
+    /// GameObject. Position is used solely as the on-disk key, written from the
+    /// building's CURRENT position at save time, so a relocated building simply
+    /// persists under its new key. (The handoff suggested keying on "the save
+    /// GUID / instance identity that MD's mode persistence already uses" — that
+    /// was wrong: <c>WagonShopEnhancement</c> keys on a position hash.)
     /// </summary>
     public class StoragePriorityData : MonoBehaviour
     {
-        /// <summary>Item key meaning "every item" — the building-wide default.</summary>
+        /// <summary>Item key meaning "every item" — the storage-wide priority.</summary>
         public const int AllItemsKey = -1;
 
-        /// <summary>itemKey (int)ItemID, or AllItemsKey → tier.</summary>
-        private readonly Dictionary<int, StorageTier> _tiers = new Dictionary<int, StorageTier>();
+        public const int MinPriority = 1;
+        public const int MaxPriority = 9;
+
+        /// <summary>Vanilla behavior; also what an unset storage reports.</summary>
+        public const int DefaultPriority = 5;
+
+        /// <summary>itemKey ((int)ItemID, or AllItemsKey) → priority 1–9.</summary>
+        private readonly Dictionary<int, int> _priorities = new Dictionary<int, int>();
 
         /// <summary>Every live instance, so save can sync current positions without a scene scan.</summary>
         internal static readonly HashSet<StoragePriorityData> Live = new HashSet<StoragePriorityData>();
@@ -56,13 +46,13 @@ namespace ManifestDelivery.Components
         private bool _restored;
 
         public StorageBuilding? Storage => _storage;
-        public bool HasAnyTier => _tiers.Count > 0;
-        internal IEnumerable<KeyValuePair<int, StorageTier>> TiersRO => _tiers;
+        public bool HasAnyPriority => _priorities.Count > 0;
+        internal IEnumerable<KeyValuePair<int, int>> PrioritiesRO => _priorities;
 
         /// <summary>
-        /// False until this building has read its saved tiers. Saving must ignore
-        /// un-restored components — otherwise a save during the attach window
-        /// would persist "no tiers" over the player's real settings.
+        /// False until this building has read its saved priorities. Saving must
+        /// ignore un-restored components — otherwise a save during the attach
+        /// window would persist "nothing set" over the player's real settings.
         /// </summary>
         internal bool Restored => _restored;
 
@@ -97,49 +87,66 @@ namespace ManifestDelivery.Components
         private IEnumerator RestoreDelayed()
         {
             yield return null;
-            if (_restored) yield break;
+            EnsureRestored();
+        }
+
+        /// <summary>
+        /// Restores saved priorities now if that has not happened yet. The UI
+        /// calls this before reading or writing: it can attach the component and
+        /// take a click before the delayed restore runs, and that restore would
+        /// then overwrite the click. Safe here because a building shown in a
+        /// window is already at its real position (the prefab-origin trap only
+        /// applies during load).
+        /// </summary>
+        internal void EnsureRestored()
+        {
+            if (_restored) return;
             _restored = true;
             Systems.StoragePriorityStore.RestoreInto(this);
         }
 
         /// <summary>
-        /// Effective tier for an item: the per-item tier if set, otherwise the
-        /// building-wide default, otherwise Unset (vanilla behaviour).
+        /// Effective priority for an item: its own priority if set, otherwise the
+        /// storage-wide one, otherwise <see cref="DefaultPriority"/> (vanilla).
         /// </summary>
-        public StorageTier GetTier(int itemKey)
+        public int GetPriority(int itemKey)
         {
-            if (_tiers.TryGetValue(itemKey, out var tier) && tier != StorageTier.Unset)
-                return tier;
-            if (itemKey != AllItemsKey && _tiers.TryGetValue(AllItemsKey, out var fallback))
-                return fallback;
-            return StorageTier.Unset;
+            if (_priorities.TryGetValue(itemKey, out int own))
+                return own;
+            if (itemKey != AllItemsKey && _priorities.TryGetValue(AllItemsKey, out int storageWide))
+                return storageWide;
+            return DefaultPriority;
         }
 
-        public void SetTier(int itemKey, StorageTier tier)
+        /// <summary>
+        /// The priority set on this exact key, or 0 when it has none (an item
+        /// then follows the storage-wide priority). The UI uses this to tell an
+        /// item's own setting apart from an inherited one.
+        /// </summary>
+        public int GetOwnPriority(int itemKey)
         {
-            if (tier == StorageTier.Unset) _tiers.Remove(itemKey);
-            else                           _tiers[itemKey] = tier;
+            return _priorities.TryGetValue(itemKey, out int own) ? own : 0;
+        }
+
+        /// <summary>
+        /// Sets a priority, clamped to 1–9. Pass 0 to clear it. A storage-wide 5
+        /// is stored as "nothing set" because it is vanilla; an item's own 5 is
+        /// kept, since it deliberately exempts that item from the storage-wide
+        /// priority.
+        /// </summary>
+        public void SetPriority(int itemKey, int priority)
+        {
+            if (priority <= 0 || (itemKey == AllItemsKey && priority == DefaultPriority))
+                _priorities.Remove(itemKey);
+            else
+                _priorities[itemKey] = Mathf.Clamp(priority, MinPriority, MaxPriority);
             Systems.StoragePriorityStore.MarkDirty();
         }
 
-        /// <summary>Cycles the building-wide default. Used by the M1 test hotkey until M2 ships real UI.</summary>
-        public StorageTier CycleDefaultTier()
+        internal void LoadPriorities(Dictionary<int, int> source)
         {
-            StorageTier next = GetTier(AllItemsKey) switch
-            {
-                StorageTier.Unset      => StorageTier.Preferred,
-                StorageTier.Preferred  => StorageTier.Normal,
-                StorageTier.Normal     => StorageTier.LastResort,
-                _                      => StorageTier.Unset,
-            };
-            SetTier(AllItemsKey, next);
-            return next;
-        }
-
-        internal void LoadTiers(Dictionary<int, StorageTier> source)
-        {
-            _tiers.Clear();
-            foreach (var kv in source) _tiers[kv.Key] = kv.Value;
+            _priorities.Clear();
+            foreach (var kv in source) _priorities[kv.Key] = kv.Value;
         }
     }
 }

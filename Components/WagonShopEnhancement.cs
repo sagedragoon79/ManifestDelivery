@@ -27,10 +27,11 @@ namespace ManifestDelivery.Components
         Camp,
 
         /// <summary>
-        /// Tuned for the central stockpile / industry hub area.
-        /// Drops IgnoreGloballyAssignedRequests so wagons participate in the
-        /// global logistics pool and handle any bulk request in the settlement.
-        /// Wagon count capped by MaxWagonsHub config (default 4).
+        /// Tuned for the central stockpile / industry hub area. HubHaulSearchEntry
+        /// serves deliveries and pickups anywhere in the work radius. Also drops
+        /// IgnoreGloballyAssignedRequests, whose only effect in the game is fire
+        /// duty: carrying water to burning buildings.
+        /// Wagon count capped by MaxWagonsHub config.
         /// </summary>
         Hub,
     }
@@ -151,6 +152,21 @@ namespace ManifestDelivery.Components
         /// writing default.txt instead of the real per-save file. Ignores empty
         /// values so a transient clear never overwrites a good name.
         /// </summary>
+        /// <summary>
+        /// Forgets the latched town. Called after SaveManager.Init(), which the
+        /// game runs on EVERY town change (new game, restart, reroll, loading
+        /// from inside a game, and the start scene). Load paths set the real
+        /// name right after Init and re-latch it; a new game has no name until
+        /// its first save. Without this, a brand-new town kept the previous
+        /// town's identity and read/wrote that town's files until it was saved.
+        /// </summary>
+        internal static void ResetSaveIdentity()
+        {
+            if (string.IsNullOrEmpty(_lastKnownSaveName)) return;
+            _lastKnownSaveName = "";
+            ManifestDeliveryMod.LogVerbose("[MD] Save identity cleared (town change).");
+        }
+
         public static void LatchSaveName(string name)
         {
             name = NormalizeSaveIdentity(name);
@@ -236,6 +252,19 @@ namespace ManifestDelivery.Components
         {
             string current = GetActiveSaveName();
             if (_loadedForSave == current) return;
+
+            // A brand-new town has no save name until its first save. Keep its
+            // modes in memory only — never read or write default.txt — and adopt
+            // them under the town's real name when it first saves (below).
+            if (string.IsNullOrEmpty(current))
+            {
+                _loadedForSave = current;
+                SavedModes.Clear();
+                return;
+            }
+
+            // Switching to a real town here (a load) discards any unsaved new
+            // town's modes; only OnGameSaved adopts them, at that town's first save.
             _loadedForSave = current;
             SavedModes.Clear();
 
@@ -335,6 +364,9 @@ namespace ManifestDelivery.Components
             try
             {
                 string current = GetActiveSaveName();
+                // No identity yet (new, unsaved town): stay in memory. The first
+                // save adopts these modes under the real name.
+                if (string.IsNullOrEmpty(current)) return;
                 string path = GetSaveFilePath(current);
                 var dir = Path.GetDirectoryName(path);
                 if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
@@ -349,6 +381,28 @@ namespace ManifestDelivery.Components
             {
                 ManifestDeliveryMod.Log.Warning($"[MD] SaveModesToDisk failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Called after the game writes a save. Adopts a new town's in-memory
+        /// modes under its first real name, and keeps the modes file in step
+        /// with the game's save cadence.
+        /// </summary>
+        internal static void OnGameSaved()
+        {
+            string current = GetActiveSaveName();
+            if (_loadedForSave == "" && !string.IsNullOrEmpty(current) && SavedModes.Count > 0)
+            {
+                // First save of a brand-new town: the game just created its
+                // folder, so no modes file exists yet. Keep what was set so far.
+                _loadedForSave = current;
+                SaveModesToDisk();
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD] New town '{current}' saved for the first time — kept {SavedModes.Count} shop mode(s) set before the save.");
+                return;
+            }
+            EnsureLoadedForCurrentSave();
+            if (SavedModes.Count > 0) SaveModesToDisk();
         }
 
         /// <summary>
@@ -369,6 +423,7 @@ namespace ManifestDelivery.Components
             {
                 if (_mode == value) return;
                 _mode = value;
+                EnsureLoadedForCurrentSave();
                 SavedModes[GetShopKey()] = value;
                 SaveModesToDisk();
                 OnModeChanged();
@@ -414,7 +469,8 @@ namespace ManifestDelivery.Components
         };
 
         /// <summary>
-        /// Hub wagons participate in the global request pool.
+        /// Hub wagons join the global request pool — in practice, fire duty
+        /// (the only globally assigned requests carry water to fires).
         /// All other modes keep IgnoreGloballyAssignedRequests.
         /// </summary>
         public bool IgnoresGlobalRequests => Mode != ShopMode.Hub;
@@ -496,6 +552,10 @@ namespace ManifestDelivery.Components
             // Update work area visual circle
             UpdateWorkAreaCircle();
 
+            // Repaint the mode buttons if this shop's window is open. Covers the
+            // mode key, which changes the mode without touching the buttons.
+            Patches.ModeButtonPatches.RefreshIfShowing(this);
+
             // Update the ShopEnhancement cache on all wagons currently assigned
             // to this shop so their flag overrides reflect the new mode.
             WagonShop? shop = GetComponent<WagonShop>();
@@ -505,7 +565,12 @@ namespace ManifestDelivery.Components
             {
                 WagonEnhancementData? data = wagon.GetComponent<WagonEnhancementData>();
                 if (data != null)
+                {
+                    // Claims made under the old mode (e.g. Hub claims on town
+                    // buildings) must not follow the wagon into the new mode.
+                    data.ReleaseClaims(wagon, "mode change");
                     data.ShopEnhancement = this;
+                }
 
                 // Recalculate capacity for Hub mode bonus
                 wagon.CalculateCarryCapacity();
@@ -723,8 +788,11 @@ namespace ManifestDelivery.Components
             // UIBuildingInfoWindow.SetTargetData — no polling needed.
 
             // Mode cycling: only respond when the shop's info window is open.
-            if (!UnityEngine.Input.GetKeyDown(ManifestDeliveryMod.ModeCycleKey)) return;
-            if (selected)
+            // ModeCycleKeyPressed requires the exact modifiers (so Ctrl+Shift+M,
+            // the stats report, no longer also cycles a plain-M binding) and
+            // ignores keys typed into a text field.
+            if (!selected) return;
+            if (ManifestDeliveryMod.ModeCycleKeyPressed())
                 CycleMode();
         }
 

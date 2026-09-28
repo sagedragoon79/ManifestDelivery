@@ -11,10 +11,10 @@ namespace ManifestDelivery.Patches
     ///   1. Raises maxWorkers to the saved-mode cap (Hub=4) BEFORE the
     ///      OnGameFinishedLoadingFinalize wagon-registration loop runs, so
     ///      vanilla has room to re-register all saved wagons.
-    ///   2. Postfix sweep: force-registers any orphaned TransportWagons that
-    ///      point to this shop via their own `wagonShop` reference but got
-    ///      skipped by vanilla's registration loop. This catches wagons whose
-    ///      paired wainwright wasn't in workersRO at load time.
+    ///   2. Postfix: re-registers TransportWagons that point to this shop via
+    ///      their own `wagonShop` reference but got skipped by vanilla's
+    ///      registration loop (their paired wainwright wasn't in workersRO at
+    ///      load time). It does NOT adopt unowned wagons — see Postfix.
     ///
     /// Why this hook (not Awake): at Awake time, transform.position is still
     /// the prefab origin (500,0,500) — the save system sets position later.
@@ -102,10 +102,16 @@ namespace ManifestDelivery.Patches
         }
 
         /// <summary>
-        /// After vanilla registration: sweep the world for TransportWagons
-        /// that point to this shop but aren't in registeredWagons. These are
-        /// orphans whose paired wainwright didn't make it into workersRO
-        /// (save-load cap issue). Add them directly via reflection.
+        /// After vanilla registration: re-register wagons that point to this
+        /// shop but aren't in registeredWagons.
+        ///
+        /// This used to also ADOPT the nearest "unowned" wagons up to the cap.
+        /// Removed 2026-09-28: each shop finalizes separately and
+        /// TransportWagon.Load doesn't restore wagonShop, so when the first shop
+        /// finalized, every other shop's wagons still looked unowned — it took
+        /// them (log: "unowned=30 … adopted=5"), and adopted wagons could end
+        /// up with no driver. Vanilla already hands unowned wagons to workers
+        /// who lack one (WagonShop.WagonValidForWorkerAssignment).
         /// </summary>
         public static void Postfix(WagonShop __instance)
         {
@@ -115,98 +121,21 @@ namespace ManifestDelivery.Patches
                 var list = field?.GetValue(__instance) as List<TransportWagon>;
                 if (list == null) return;
 
+                // The game's own wagon list — no FindObjectsOfType scene scan.
+                var wagons = UnitySingleton<GameManager>.Instance?.resourceManager?.transportWagonsRO;
+                if (wagons == null) return;
+
                 int before = list.Count;
                 int added = 0;
-                int adopted = 0;
-                int totalWagons = 0;
-                int unownedWagons = 0;
-                int otherShopWagons = 0;
-
-                var allWagons = Object.FindObjectsOfType<TransportWagon>();
-                var orphans = new List<TransportWagon>();
-
-                foreach (var wagon in allWagons)
+                foreach (var wagon in wagons)
                 {
-                    if (wagon == null) continue;
-                    totalWagons++;
-
-                    if (wagon.wagonShop == null)
-                    {
-                        unownedWagons++;
-                        orphans.Add(wagon);
-                        continue;
-                    }
-                    if (wagon.wagonShop != __instance) { otherShopWagons++; continue; }
+                    if (wagon == null || wagon.wagonShop != __instance) continue;
                     if (list.Contains(wagon)) continue;
-
                     list.Add(wagon);
                     added++;
                 }
 
-                // ─── Distance-based orphan adoption ───────────────────────────
-                // If this shop has room under its cap, claim the nearest
-                // unowned wagons. Camp/Hub cap comes from maxWorkers (which
-                // our Prefix raised to the saved-mode cap).
-                var maxField = FindBackingField(__instance.GetType(), "maxWorkers");
-                int cap = maxField != null ? (int)maxField.GetValue(__instance) : 2;
-                int gap = cap - list.Count;
-
-                if (gap > 0 && orphans.Count > 0)
-                {
-                    Vector3 shopPos = __instance.transform.position;
-                    orphans.Sort((a, b) =>
-                        (a.transform.position - shopPos).sqrMagnitude
-                            .CompareTo(
-                        (b.transform.position - shopPos).sqrMagnitude));
-
-                    // Access the protected assignedWagonsByWorker dict so we
-                    // can also register the worker→wagon link. Without this,
-                    // wainwrights keep building new wagons because the game's
-                    // "does this worker have a wagon?" lookup misses our
-                    // orphans.
-                    var assignedField = typeof(WagonShop).GetField(
-                        "assignedWagonsByWorker", AllInstance);
-                    var assignedDict = assignedField?.GetValue(__instance)
-                        as System.Collections.IDictionary;
-
-                    int toAdopt = System.Math.Min(gap, orphans.Count);
-                    for (int i = 0; i < toAdopt; i++)
-                    {
-                        var orphan = orphans[i];
-                        try
-                        {
-                            orphan.AssignedToWagonShop(__instance);
-                            list.Add(orphan);
-
-                            // Match to first unassigned wainwright
-                            if (assignedDict != null)
-                            {
-                                foreach (var worker in __instance.workersRO)
-                                {
-                                    if (worker == null) continue;
-                                    if (assignedDict.Contains(worker)) continue;
-                                    assignedDict.Add(worker, orphan);
-                                    break;
-                                }
-                            }
-
-                            adopted++;
-                        }
-                        catch (System.Exception ex)
-                        {
-                            ManifestDeliveryMod.Log.Warning(
-                                $"[MD] Orphan adoption failed for {orphan?.name}: {ex.Message}");
-                        }
-                    }
-                }
-
-                ManifestDeliveryMod.Log.Msg(
-                    $"[MD] Finalize Postfix survey for {__instance.gameObject.name}: " +
-                    $"worldWagons={totalWagons}  unowned={unownedWagons}  " +
-                    $"otherShops={otherShopWagons}  repaired={added}  adopted={adopted}  " +
-                    $"finalList={list.Count}  cap={cap}");
-
-                if (added + adopted > 0)
+                if (added > 0)
                 {
                     // Fire the count-changed callback so UI updates
                     var cbField = typeof(WagonShop).GetField(
@@ -215,7 +144,7 @@ namespace ManifestDelivery.Patches
                     cb?.Invoke();
 
                     ManifestDeliveryMod.Log.Msg(
-                        $"[MD] Finalize Postfix: repaired {added} orphaned wagon(s) " +
+                        $"[MD] Finalize Postfix: re-registered {added} wagon(s) " +
                         $"for {__instance.gameObject.name} (count: {before} → {list.Count})");
                 }
             }

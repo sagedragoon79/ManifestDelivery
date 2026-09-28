@@ -1,7 +1,8 @@
 # Storage Priorities in Manifest Delivery — design + build plan
 
 **Created:** 2026-08-21 (review session)
-**Status:** DESIGN ONLY — no code written. Target: MD **v1.1.0** (new feature; current 1.0.20).
+**Status:** M0 done, M1 + M2 built (M2 NOT play-tested, 2026-09-28). Target: MD **v1.1.0**
+(new feature; current 1.0.21). Default OFF behind `StoragePriorityEnabled`.
 **Origin:** Review of the community mod *Storage Priorities* (3am, v1.3.2) for a possible fold.
 
 ---
@@ -86,9 +87,9 @@ implemented in `Patches/StoragePriorityPatches.cs` (M0). **Every later milestone
 must preserve all three.**
 
 1. **DESTINATION ONLY.** Bias `CanStore*` buckets; never `HasItem*`.
-   A Preferred storage boosted on *both* sides would attract goods *and* be the
+   A high-priority storage boosted on *both* sides would attract goods *and* be the
    preferred place to drain — A pulls from B, B pulls back from A, forever.
-   Biasing only the destination side means goods flow toward Preferred and
+   Biasing only the destination side means goods flow toward high priority and
    **stop there**: the cycle has no return edge, so it cannot close.
 2. **TAPER WITH FULLNESS.** Scale the bias by the fraction of space still free.
    A flat bias overrides vanilla's `(1-fullness)*100` and overfills the target,
@@ -128,15 +129,22 @@ onto a UI mod. KC is the wrong home — it does not own logistics.
 ## Design (MD's own)
 
 ### Data model
-- Priority is **per (storage building, item)** — a per-item tier is what makes it
-  useful ("grain goes to the granary near the bakery, not the far one").
-- Keep the ladder short. Suggest **3 tiers + unset** (Preferred / Normal / Last
-  Resort / Unset) rather than a 1–5 numeric scale: fewer decisions, and it maps
-  to language instead of numbers — consistent with the Camp/Hub/Standard
-  vocabulary MD already puts in the building window.
-- Score contribution: `bias = tierWeight * strength`, added in the `GetBaseScore`
-  postfix. One tunable `strength` pref (KC slider): high = priority always wins,
-  low = priority breaks ties and distance still matters.
+- Priority is **per (storage building, item)** — a per-item setting is what makes
+  it useful ("grain goes to the granary near the bakery, not the far one").
+- **Scale: 1–9, 9 highest, default 5 = vanilla.** (DECIDED 2026-09-28 by the
+  user, replacing the named Preferred/Normal/Last Resort tiers built in M1.) This
+  is the fleet's own priority convention — Tended Wilds' forager priorities use
+  the same 1–9 / default-5 scale and predate the review of 3am's mod — so players
+  see one priority language across SageDragoon mods.
+- **Two levels (user-approved):** a storage-wide priority plus optional per-item
+  priorities. An item with its own priority uses it; every other item follows
+  the storage-wide one. Setting one item never changes another. An item's own 5
+  is meaningful (it exempts that item from a storage-wide 7); a storage-wide 5 is
+  stored as "nothing set".
+- Score contribution: **linear from 5** — `weight = (p - 5) / 4`, so 9 adds the
+  full `StoragePriorityStrength`, 1 subtracts it, each step is a quarter.
+  Positive weights are tapered by free space (Rule 2). One tunable strength pref
+  (KC slider): high = priority almost always wins, low = it breaks ties.
 
 ### Persistence — per save, keyed stably
 **Do not** use a single global file, and **do not** key on world position. Both
@@ -152,13 +160,33 @@ Use MD's existing pattern verbatim (`Components/WagonShopEnhancement.cs`):
 For the building key, prefer the building's **save GUID / instance identity**
 (what MD's mode persistence already keys on) over coordinates.
 
-### UI
-Reuse MD's proven injection path: `Patches/ModeButtonPatches.cs` postfixes the
-building info window's `SetTargetData` and gets `__instance` directly — no
-hunting for pooled UI objects. Do the same on the storage window.
-
-Keep it small: one per-item tier control in the storage item list, styled to
-match MD's existing mode buttons rather than inventing new chrome.
+### UI (M2 — as built, `Patches/StoragePriorityUIPatches.cs`)
+Stepper = Tended Wilds' forager priority arrows (`[▼] n [▲]`, TMP ▲/▼ glyphs,
+gold on dark), so priority looks the same across the fleet.
+- **Storage-wide row** — first child of the storage section's layout region
+  (`UIBuildingInfoWindowStorageModuleCollapsible.storageModuleParent`), added in
+  a postfix on `Collapsible.Init(Building, UIWindow)`:
+  `Storage Priority [▼] 5 [▲]`.
+- **Per-item row** — appended to vanilla's Storage Limits popup
+  (`UIResourceLimitSubWindow.Initialize` postfix; the popup opens when the
+  player clicks an item icon), under the min/max quota rows:
+  `Priority [▼] 7 [▲] [Default]`. Default is lit while the item follows the
+  storage; clicking it clears the item's own priority.
+- **Icon marker** — ▲ (above 5) or ▼ (below 5) in the icon's free bottom-left
+  corner; full strength = own, faded = inherited. The number is in the icon's
+  tooltip ("Hauling priority: 7"). **Clean-room line:** no number badge on the
+  icon — a clickable number badge per item is 3am's design.
+- Icons are pooled and re-initialized every second, so a `PriorityCellTag`
+  binds each icon to (storage, item) in a prefix on the storage-aware
+  `Initialize(Building, ReadOnlyCollection<Item>, Item)`, and a prefix on the
+  base `UIStorageItem.Initialize(Item)` unbinds icons reused by non-storage
+  windows. Marker updates are cached by state.
+- Clicks use a small `MdPointer` handler, not `EventTrigger` (which swallows
+  scroll-wheel events and would stop the building window scrolling) and not
+  `Button` (EventSystem focus trap).
+- Eligible: `StorageBuilding` except `MarketBuilding` and `TradingPost`.
+- Every hook is a manual patch in its own try/catch — a renamed UI method
+  disables only that piece of UI.
 
 ### Rebalancing (PHASE 2 — defer)
 Ship routing first. Actively moving already-stored stock into higher-priority
@@ -193,27 +221,39 @@ If built, it must be:
      player's tiers → it now loads before merging.
   Temporary input until M2: a configurable hotkey (default **K**) cycles the
   selected storage's tier.
-- **M2 — UI.** Per-item tier control in the storage window via the
-  `SetTargetData` postfix pattern.
-- **M3 — Settings + polish.** KC registration (`KeepClarityIntegration.cs`
-  pattern), strength slider, feature master-toggle default OFF, Storage
-  Priorities soft-dep warning.
+- **M2 — UI + 1–9 scale.** **BUILT, NOT YET PLAY-TESTED (2026-09-28).** See UI
+  above. Also converted M1's named tiers to the 1–9 scale (data, store format
+  `positionKey|itemKey|priority`, routing weight), removed the temporary K
+  hotkey, and pulled the KC registration (master toggle + strength slider,
+  both live) forward from M3 so the feature can be switched on in-game.
+- **M3 — Polish.** Storage Priorities (3am) soft-dep check: detect his mod, log
+  a warning, and default ours off. Consider copying priorities with vanilla's
+  building settings copy/paste (`ClonerPaste`).
 - **M4 (optional) — Rebalancer**, under the constraints above.
 
 ## Verification
-- **Routing:** set a far storehouse to Preferred → watch a hauler walk past a
-  nearer one. Set it to Last Resort → watch it get skipped until others fill.
-- **PING-PONG (do this every milestone):** with a Preferred storage set, leave a
+- **UI (M2):** enable Storage Priorities in KC → open a storehouse → the
+  storage section starts with `Storage Priority [▼] 5 [▲]`. Step it to 7 → every
+  item icon shows a faded ▲. Click an item icon → the Storage Limits popup has
+  `Priority [▼] 7 [▲] [Default]` with Default lit. Step the item to 9 → Default
+  unlights, that icon's ▲ goes full strength, and its tooltip reads "Hauling
+  priority: 9". Click Default → back to faded. Open a house or workshop → no
+  row and no markers (pooled icons must not keep markers). Scroll the building
+  window with the cursor over the row.
+- **Routing:** set a far storehouse to 9 → watch a hauler walk past a nearer
+  one. Set it to 1 → watch it get skipped until others fill.
+- **PING-PONG (do this every milestone):** with a priority-9 storage set, leave a
   town running for 10+ minutes with `HaulDiagnostics` on and confirm no item
   repeatedly moves storage→storage. Specifically watch for a `DELIVER` whose
   *origin* is a storage and whose *destination* is another storage, then the
   reverse move for the same item shortly after. Highest-risk setups to test:
-  (a) two storages both with a **min quota** for the same item, (b) a Preferred
-  storage with a **max quota** it can exceed, (c) a Preferred storage that is
+  (a) two storages both with a **min quota** for the same item, (b) a priority-9
+  storage with a **max quota** it can exceed, (c) a priority-9 storage that is
   nearly **full** (Rule 2's taper should quietly stop favouring it).
-- **Persistence:** set tiers → save → main menu → load a *different* save (tiers
-  must not leak) → reload the first (tiers must return).
-- **Relocation:** move a tiered storehouse via TW/MD relocation; tiers must follow.
+- **Persistence:** set priorities → save → main menu → load a *different* save
+  (priorities must not leak) → reload the first (priorities must return).
+- **Relocation:** move a prioritized storehouse via TW/MD relocation; its
+  priorities must follow.
 - **Perf:** `GetBaseScore` is on the logistics hot path. Profile with FFPerfProbe
   (see `reference_ff_perf_probe`) at 500+ pop. The postfix must be O(1) — a
   dictionary lookup, no scans, no allocations. This is the single biggest perf

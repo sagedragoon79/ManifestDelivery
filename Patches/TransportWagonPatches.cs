@@ -13,19 +13,20 @@ namespace ManifestDelivery.Patches
     /// Patch summary
     /// ──────────────────────────────────────────────────────────────────────────
     ///  Start_Postfix              — adds WagonEnhancementData component.
-    ///  SetupSearchEntries_Postfix — injects ReturnTripSearchEntry into the wagon's
-    ///                              task search list.
+    ///  SetupSearchEntries_Postfix — injects the ReturnTrip, CampHaul and HubHaul
+    ///                              search entries into the wagon's task search list.
     ///  ItemBundleDroppedOff_Post  — sets JustDelivered = true when a delivery
-    ///                              completes, recording the drop-off position.
+    ///                              completes.
     ///  AssignedToWagonShop_Post   — caches the shop's WagonShopEnhancement on the
-    ///                              wagon's data component.
-    ///  UnAssignedFromWagonShop_Post — clears the cached shop reference.
-    ///  workerFlags_Get            — for Hub-mode wagons, strips
-    ///                              IgnoreGloballyAssignedRequests so they participate
-    ///                              in the global request pool permanently.
-    ///  ParkWagonThenIdleSubTask_Ctor — cleans up any pending temporary assignment
-    ///                              when the wagon decides to park (return-trip found
-    ///                              nothing useful).
+    ///                              wagon's data component and reapplies capacity.
+    ///  UnAssignedFromWagonShop_Post — releases MD claims, clears the cached shop
+    ///                              reference and reapplies capacity.
+    ///  workerFlags_Get            — Hub "fire duty": strips
+    ///                              IgnoreGloballyAssignedRequests. The only
+    ///                              globally assigned requests in the game carry
+    ///                              water to building fires.
+    ///  ParkWagonThenIdleSubTask_Ctor — releases MD claims when the wagon parks.
+    ///  LogisticsTask_OnSearchSuccess — releases MD claims once a route is built.
     /// </summary>
     [HarmonyPatch]
     internal static class TransportWagonPatches
@@ -54,14 +55,12 @@ namespace ManifestDelivery.Patches
         [HarmonyPatch(typeof(TransportWagon), "SetupSearchEntries")]
         private static void SetupSearchEntries_Postfix(TransportWagon __instance)
         {
+            // Vanilla Start sets up search entries before our Start postfix
+            // runs, so on load the component is usually not there yet. That's
+            // expected (it logged a warning per wagon on every load).
             WagonEnhancementData? data = __instance.GetComponent<WagonEnhancementData>();
             if (data == null)
-            {
-                ManifestDeliveryMod.Log.Warning(
-                    $"[MD] SetupSearchEntries: WagonEnhancementData missing on " +
-                    $"{__instance.name}, adding now.");
                 data = __instance.gameObject.AddComponent<WagonEnhancementData>();
-            }
 
             // Back-link to the shop's enhancement if we haven't already.
             // AssignedToWagonShop_Postfix normally handles this, but if it
@@ -85,19 +84,22 @@ namespace ManifestDelivery.Patches
                 return;
             }
 
+            // Real order after the task manager's stable sort (see ClaimHelpers):
+            //   KickOut(10) → ReturnTrip(3) → LogisticsProxy(2) → CampHaul(2) →
+            //   HubHaul(1) → ParkWagon(-10)
             gm.defaultTaskManager.AddTaskSearchEntry(
                 __instance,
                 new ReturnTripSearchEntry(__instance, data));
 
-            // Camp haul: priority 2, fires after ReturnTrip(3) but before LogisticsProxy(0)
+            // Camp haul: priority 2 — ties with LogisticsProxy and sorts after it.
             gm.defaultTaskManager.AddTaskSearchEntry(
                 __instance,
                 new CampHaulSearchEntry(__instance, data));
 
-            // Hub haul: priority 1, fires after CampHaul(2) but before LogisticsProxy(0).
-            // The proactive Hub distributor — serves any delivery/move-out
-            // request within the Hub radius (markets, shelters, producers,
-            // storages) instead of waiting on opportunistic backhaul.
+            // Hub haul: priority 1. The proactive Hub distributor — serves any
+            // delivery/move-out request within the Hub radius (markets,
+            // shelters, producers, storages) instead of waiting on
+            // opportunistic backhaul.
             gm.defaultTaskManager.AddTaskSearchEntry(
                 __instance,
                 new HubHaulSearchEntry(__instance, data));
@@ -112,8 +114,7 @@ namespace ManifestDelivery.Patches
             WagonEnhancementData? data = __instance.GetComponent<WagonEnhancementData>();
             if (data == null) return;
 
-            data.JustDelivered        = true;
-            data.LastDeliveryPosition = __instance.transform.position;
+            data.JustDelivered = true;
         }
 
         // ── 4. Cache shop reference on assignment ─────────────────────────────
@@ -130,6 +131,11 @@ namespace ManifestDelivery.Patches
             data.ShopEnhancement = newWagonShopAssignedTo != null
                 ? newWagonShopAssignedTo.GetComponent<WagonShopEnhancement>()
                 : null;
+
+            // Hub's +20% capacity comes from the shop's mode, so a newly built
+            // or newly paired wagon needs its capacity recalculated here —
+            // otherwise it only changed on a mode switch or a tech unlock.
+            __instance.CalculateCarryCapacity();
         }
 
         [HarmonyPostfix]
@@ -137,15 +143,23 @@ namespace ManifestDelivery.Patches
         private static void UnAssignedFromWagonShop_Postfix(TransportWagon __instance)
         {
             WagonEnhancementData? data = __instance.GetComponent<WagonEnhancementData>();
-            if (data != null)
-                data.ShopEnhancement = null;
+            if (data == null) return;
+
+            data.ReleaseClaims(__instance, "left its shop");
+            data.ShopEnhancement = null;
+            __instance.CalculateCarryCapacity();
         }
 
-        // ── 5. Hub mode: remove IgnoreGloballyAssignedRequests ────────────────
+        // ── 5. Hub mode: fire duty (remove IgnoreGloballyAssignedRequests) ────
         //
         //  TransportWagon.workerFlags is a property (get-only).  We patch its
-        //  getter so that Hub-mode wagons permanently drop the flag and compete
-        //  for all global requests, turning them into high-priority bulk porters.
+        //  getter so that Hub-mode wagons drop the flag and join the global
+        //  request pool. The ONLY globally assigned requests in the game are
+        //  the water requests of burning buildings (ExtinguishFireResource,
+        //  decompile L60827), so this makes Hub wagons help carry water to
+        //  fires. It adds no general hauling — Hub distribution comes from
+        //  HubHaulSearchEntry. (An earlier comment claimed it opened "all global
+        //  requests"; verified 2026-09-28 that it doesn't.)
         //
         //  Note: Harmony patches property getters by their backing method name.
 
@@ -160,20 +174,19 @@ namespace ManifestDelivery.Patches
 
             if (!data.ShopEnhancement.IgnoresGlobalRequests)
             {
-                // Hub mode: clear IgnoreGloballyAssignedRequests (bit 2).
+                // Hub mode: clear IgnoreGloballyAssignedRequests (bit 2) — fire duty.
                 __result &= ~LogisticsWorkerFlags.IgnoreGloballyAssignedRequests;
             }
         }
 
-        // ── 6. Clean up temporary assignment when parking ─────────────────────
+        // ── 6. Release MD claims when parking ─────────────────────────────────
         //
         //  ParkWagonThenIdleSubTask is constructed when ParkWagonSearchEntry
-        //  wins the task search (LogisticsProxy found nothing even after our
-        //  ReturnTripSearchEntry ran).  We clean up the temporary requester
-        //  assignment at this point so it doesn't linger on the wagon.
-        //
-        //  Because ParkWagonThenIdleSubTask is an inner class, we identify it
-        //  by its constructor's declaring type name rather than a typeof().
+        //  wins the task search (LogisticsProxy found nothing).  Any claim MD
+        //  made didn't produce a route, so release it here. (Before 2026-09-28
+        //  this only released the legacy Hub claim, so a multi-source Hub claim
+        //  leaked its assignment AND its herd-guard count, which then kept every
+        //  Hub wagon off that request until reload.)
 
         [HarmonyPostfix]
         [HarmonyPatch(typeof(ParkWagonThenIdleSubTask), MethodType.Constructor,
@@ -186,100 +199,31 @@ namespace ManifestDelivery.Patches
             WagonEnhancementData? data = wagon.GetComponent<WagonEnhancementData>();
             if (data == null) return;
 
-            // If there's a lingering temporary assignment, release it.
-            if (data.TemporaryRequester != null)
-            {
-                data.ClearTemporaryAssignment(wagon);
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] ReturnTrip: no logistics work found near drop-off for " +
-                    $"{wagon.name}, parking and releasing temp assignment.");
-            }
-
-            // Clean up camp haul assignment too
-            if (data.CampHaulRequester != null)
-            {
-                data.ClearCampHaulAssignment(wagon);
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] CampHaul: no logistics work found for " +
-                    $"{wagon.name}, parking and releasing camp haul assignment.");
-            }
-
-            // Clean up hub haul assignment too
-            if (data.HubHaulRequester != null)
-            {
-                data.ClearHubHaulAssignment(wagon);
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] HubHaul: no logistics work found for " +
-                    $"{wagon.name}, parking and releasing hub haul assignment.");
-            }
+            data.ReleaseClaims(wagon, "parked — no route");
 
             // Also ensure JustDelivered is cleared in case the ReturnTrip entry
             // somehow didn't fire (e.g. game loaded mid-task).
             data.JustDelivered = false;
         }
 
-        // ── 7. Clear temporary assignment once logistics task actually starts ─
+        // ── 7. Release MD claims once a route is built ─────────────────────
         //
-        //  When a LogisticsTask starts executing (Enter is called on its first
-        //  sub-task) we know the wagon accepted the backhaul work.  We can clear
-        //  TemporaryRequester because the assignment is now permanent for the
-        //  duration of that task.
-        //
-        //  LogisticsTask inherits from Task. The "work started" transition is
-        //  signalled by taskStatus = WorkStarted, which is set inside task
-        //  processor logic.  We hook the LogisticsDestinationSubTask constructor
-        //  as a reliable proxy for "logistics task is now executing".
+        //  Vanilla only reads assignments while SEARCHING for a route
+        //  (LogisticsGlobalTaskSearch.HasValidRequests / ProcessRequestsAssigned-
+        //  ToWorker). Once OnSearchSuccess fires, the task holds its own item and
+        //  storage-space reservations, so the claims have done their job and are
+        //  released. Unassigning does not cancel the task (verified 2026-09-28:
+        //  LogisticsAssignment.OnWorkerUnassignedFromRequest only edits a
+        //  dictionary). The previous hook cleared MD's tracking WITHOUT
+        //  unassigning, which is how claims piled up for a whole session.
 
         [HarmonyPostfix]
-        [HarmonyPatch(typeof(LogisticsDestinationSubTask), MethodType.Constructor,
-            new System.Type[] { typeof(Task), typeof(IRegistersForWork) })]
-        private static void LogisticsDestSubTask_Ctor_Postfix(
-            LogisticsDestinationSubTask __instance)
+        [HarmonyPatch(typeof(LogisticsTask), "OnSearchSuccess")]
+        private static void LogisticsTask_OnSearchSuccess_Postfix(LogisticsTask __instance)
         {
-            if (__instance.owningTask?.assignedReceiver is not TransportWagon wagon) return;
-
+            if (!(__instance.assignedReceiver is TransportWagon wagon) || wagon == null) return;
             WagonEnhancementData? data = wagon.GetComponent<WagonEnhancementData>();
-            if (data == null) return;
-
-            // The wagon accepted logistics work — it's no longer a "temporary"
-            // assignment; clear the reference (but keep the assignment itself).
-            if (data.TemporaryRequester != null)
-            {
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] ReturnTrip: {wagon.name} started logistics task via " +
-                    $"backhaul to {data.TemporaryRequester.gameObject.name}.");
-                data.TemporaryRequester = null;
-            }
-
-            // Clear camp haul assignment once task actually starts
-            if (data.CampHaulRequester != null)
-            {
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] CampHaul: {wagon.name} started logistics task via " +
-                    $"camp haul to {data.CampHaulRequester.gameObject.name}.");
-                data.CampHaulRequester = null;
-            }
-
-            // Clear hub haul assignment once task actually starts. The claim is
-            // now permanent for the task's duration, so just drop our tracking
-            // reference (do NOT unassign — that would cancel the in-flight task).
-            if (data.HubHaulRequest != null)
-            {
-                // Task started: the winning wagon now owns the route, so release
-                // the herd-tracking slot (the request's unreserved deficit has
-                // dropped, which keeps other wagons off it from here).
-                ManifestDelivery.Tasks.HubHaulSearchEntry.ReleaseHubClaim(data.HubHaulRequest);
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] HubHaul: {wagon.name} started multi-source logistics task.");
-                data.HubHaulRequest = null;
-            }
-            if (data.HubHaulRequester != null)
-            {
-                ManifestDeliveryMod.LogVerbose(
-                    $"[MD] HubHaul: {wagon.name} started logistics task via " +
-                    $"hub haul to {data.HubHaulRequester.gameObject.name}.");
-                data.HubHaulRequester = null;
-            }
+            data?.ReleaseClaims(wagon, "route built");
         }
 
         // ── 8. Mode-based speed modifier ─────────────────────────────────────

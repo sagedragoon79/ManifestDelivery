@@ -22,6 +22,20 @@ namespace ManifestDelivery.Patches
 
         private const string ButtonRowName = "MD_ModeButtonRow";
 
+        // The row currently on screen and the shop it shows, so a mode change
+        // made anywhere (mode key, restore on load) can repaint it. The buttons
+        // used to repaint only in their own click handler, so a Shift+M change
+        // didn't show until the window was reopened.
+        private static GameObject? _activeRow;
+        private static WagonShopEnhancement? _activeEnhancement;
+
+        /// <summary>Repaints the mode buttons if they're showing this shop.</summary>
+        internal static void RefreshIfShowing(WagonShopEnhancement enhancement)
+        {
+            if (_activeRow == null || _activeEnhancement != enhancement) return;
+            RefreshButtonColors(_activeRow.transform, enhancement);
+        }
+
         /// <summary>
         /// Registers the manual Harmony patch. Called from Plugin.cs after
         /// PatchAll(). Manual patching matches TW's proven pattern and avoids
@@ -120,7 +134,14 @@ namespace ManifestDelivery.Patches
         {
             var existing = root.Find(ButtonRowName);
             if (existing != null)
+            {
+                if (existing.gameObject == _activeRow)
+                {
+                    _activeRow = null;
+                    _activeEnhancement = null;
+                }
                 Object.Destroy(existing.gameObject);
+            }
             HideTooltip();
         }
 
@@ -170,6 +191,9 @@ namespace ManifestDelivery.Patches
                 enhancement, gameFont, gameFontSize);
             CreateModeButton(row.transform, "Hub", ShopMode.Hub,
                 enhancement, gameFont, gameFontSize);
+
+            _activeRow = row;
+            _activeEnhancement = enhancement;
 
             ManifestDeliveryMod.Log.Msg(
                 $"[MD] ModeButton: Injected row into '{window.gameObject.name}'");
@@ -292,14 +316,16 @@ namespace ManifestDelivery.Patches
                            $"Max wagons: {ManifestDeliveryMod.MaxWagonsHub.Value}\n" +
                            $"Work radius: {ManifestDeliveryMod.HubWorkRadius.Value:F0}u\n" +
                            "Capacity: +20%  Speed: -10%\n" +
-                           "<i>Global logistics — drops IgnoreGloballyAssignedRequests " +
-                           "so wagons accept any bulk request in the settlement.</i>";
+                           "<i>Town distribution — wagons serve deliveries and pickups " +
+                           "anywhere in the work radius, and help carry water to " +
+                           "building fires.</i>";
                 default:
                     return mode.ToString();
             }
         }
 
-        private static void ShowTooltip(Transform nearTransform, string text, TMP_FontAsset font)
+        /// <summary>Shared with the storage priority rows, so MD has one tooltip look.</summary>
+        internal static void ShowTooltip(Transform nearTransform, string text, TMP_FontAsset font)
         {
             // Find root Canvas so the tooltip draws on top of everything
             var canvas = nearTransform.GetComponentInParent<Canvas>();
@@ -373,7 +399,11 @@ namespace ManifestDelivery.Patches
                 tipRT.anchoredPosition = localPoint + new Vector2(0f, 6f);
             }
 
-            // Preferred size based on text
+            // Preferred size based on text. Reset the width first: the rect keeps
+            // the previous tooltip's size, and a short one would otherwise make
+            // the next long one wrap in a narrow column.
+            if (tipRT != null)
+                tipRT.sizeDelta = new Vector2(300f, tipRT.sizeDelta.y);
             _tooltipText.ForceMeshUpdate();
             var textSize = _tooltipText.GetRenderedValues(false);
             if (tipRT != null)
@@ -382,7 +412,7 @@ namespace ManifestDelivery.Patches
                     textSize.y + 20f);
         }
 
-        private static void HideTooltip()
+        internal static void HideTooltip()
         {
             if (_tooltipObj != null) _tooltipObj.SetActive(false);
         }

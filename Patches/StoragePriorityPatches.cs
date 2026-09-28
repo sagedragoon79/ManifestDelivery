@@ -9,8 +9,12 @@ using ManifestDelivery.Systems;
 namespace ManifestDelivery.Patches
 {
     /// <summary>
-    /// Storage Priorities routing (M0 spike → M1 tiers). See
+    /// Storage Priorities routing (M0 spike → M1 data → M2 1–9 scale). See
     /// <c>_handoffs/2026-08-21_storage-priorities-fold.md</c>.
+    ///
+    /// Priority is 1–9, 9 highest, 5 = vanilla (the fleet's convention). The
+    /// bias is linear from 5: priority 9 adds the full Strength, 1 subtracts
+    /// it, and each step is a quarter of Strength.
     ///
     /// ═══ ANTI-PING-PONG CONTRACT (non-negotiable — keep all three) ══════════
     /// A naive score bias WILL shuffle goods between storages forever.
@@ -28,8 +32,9 @@ namespace ManifestDelivery.Patches
     ///   target, and trip its max-quota shed (TakeOut above max*1.1) — pushing
     ///   goods out that the bias pulls straight back in. Scaling by free space
     ///   means preference fades to nothing exactly as the storage fills.
-    ///   (Negative/LastResort bias is NOT tapered: an empty last-resort storage
-    ///   should still be avoided, and it stays usable when all else is full.)
+    ///   (Negative bias, priority 1–4, is NOT tapered: an empty low-priority
+    ///   storage should still be avoided, and it stays usable when all else
+    ///   is full.)
     ///
     /// RULE 3 — NEVER BIAS CanStore*OverCapacity, vanilla's already-full
     ///   fallback. Same overfill→shed→refill loop as Rule 2.
@@ -69,45 +74,79 @@ namespace ManifestDelivery.Patches
 
         private static bool _reverseMapBuilt;
 
+        /// <summary>
+        /// Set when the postfix throws. Pauses routing until the next map load
+        /// WITHOUT touching the saved setting — the old handler wrote
+        /// StoragePriorityEnabled=false into the player's config file.
+        /// </summary>
+        private static bool _disabledThisSession;
+
+        /// <summary>Feature on, and not paused by an error this map load.</summary>
+        internal static bool IsActive
+        {
+            get
+            {
+                var enabled = ManifestDeliveryMod.StoragePriorityEnabled;
+                return enabled != null && enabled.Value && !_disabledThisSession;
+            }
+        }
+
+        /// <summary>
+        /// Storages that take part in priorities. Markets and trading posts are
+        /// StorageBuildings too, but they stock goods for their own jobs; the UI
+        /// hides the controls for them, so routing must ignore them as well —
+        /// otherwise a market rebuilt on a demolished prioritized footprint
+        /// would inherit a priority nobody can see or clear.
+        /// </summary>
+        internal static bool IsEligibleStorage(Resource? resource)
+        {
+            return resource is StorageBuilding
+                   && !(resource is MarketBuilding)
+                   && !(resource is TradingPost);
+        }
+
         private static void Postfix(Resource __instance, IQueryContainer container, ref float __result)
         {
             try
             {
-                var enabled = ManifestDeliveryMod.StoragePriorityEnabled;
-                if (enabled == null || !enabled.Value) return;      // hot-path exit
+                if (!IsActive) return;      // hot-path exit
 
                 // RULE 1 + 3: destinations only, never the over-capacity fallback.
                 if (!IsDestinationBucket(container)) return;
 
                 var data = ResolveData(__instance);
-                if (data == null || !data.HasAnyTier) return;
+                if (data == null || !data.HasAnyPriority) return;
 
-                StorageTier tier = data.GetTier(ResolveItemKey(container));
-                if (tier == StorageTier.Unset || tier == StorageTier.Normal) return;
+                int priority = data.GetPriority(ResolveItemKey(container));
+                if (priority == StoragePriorityData.DefaultPriority) return;
 
                 float strength = ManifestDeliveryMod.StoragePriorityStrength != null
                     ? ManifestDeliveryMod.StoragePriorityStrength.Value : 0f;
                 if (strength <= 0f) return;
 
-                if (tier == StorageTier.Preferred)
+                // Linear from 5: 9 → +1, 1 → -1, each step ±0.25.
+                float weight = (priority - StoragePriorityData.DefaultPriority)
+                    / (float)(StoragePriorityData.MaxPriority - StoragePriorityData.DefaultPriority);
+
+                if (weight > 0f)
                 {
                     // RULE 2: fade out as it fills.
                     var storage = data.Storage;
                     if (storage == null) return;
                     float freeFraction = GetFreeFraction(storage);
                     if (freeFraction <= 0f) return;
-                    __result += strength * freeFraction;
+                    __result += strength * weight * freeFraction;
                 }
-                else if (tier == StorageTier.LastResort)
+                else
                 {
-                    __result -= strength;
+                    __result += strength * weight;   // weight < 0: avoid until others fill
                 }
             }
             catch (Exception ex)
             {
+                _disabledThisSession = true;
                 ManifestDeliveryMod.Log.Warning(
-                    $"[MD][StoragePri] Postfix error (disabling): {ex.Message}");
-                try { ManifestDeliveryMod.StoragePriorityEnabled.Value = false; } catch { }
+                    $"[MD][StoragePri] Routing error — paused until the next map load: {ex.Message}");
             }
         }
 
@@ -136,7 +175,7 @@ namespace ManifestDelivery.Patches
         }
 
         /// <summary>
-        /// Maps a work bucket back to the item it is for, so tiers can be
+        /// Maps a work bucket back to the item it is for, so priorities can be
         /// per item. Built once by reflecting the WorkBucketManager's
         /// (protected) canStoreWorkBucketByItem dictionary — reading it directly
         /// avoids the public getter, which logs a warning for items that have no
@@ -175,7 +214,7 @@ namespace ManifestDelivery.Patches
                 {
                     ManifestDeliveryMod.Log.Warning(
                         "[MD][StoragePri] Could not read canStoreWorkBucketByItem — " +
-                        "per-item tiers unavailable, building-wide defaults still work.");
+                        "per-item priorities unavailable, storage-wide ones still work.");
                 }
             }
             catch (Exception ex)
@@ -196,16 +235,17 @@ namespace ManifestDelivery.Patches
         /// already had its component. This path costs one dictionary hit after
         /// the first sight of a building, and AddComponent runs at most once per
         /// storage. GetBaseScore is main-thread (it builds logistics job data),
-        /// so AddComponent here is safe.
+        /// so AddComponent here is safe. The UI resolves through here too, so
+        /// both paths share one component and one cache.
         /// </summary>
-        private static StoragePriorityData? ResolveData(Resource resource)
+        internal static StoragePriorityData? ResolveData(Resource resource)
         {
             int id = resource.GetInstanceID();
             if (_dataByInstance.TryGetValue(id, out var cached))
                 return cached;   // cached negatives return here too — no rework, no write
 
             StoragePriorityData? data = null;
-            if (resource is StorageBuilding)          // load-bearing guard
+            if (IsEligibleStorage(resource))          // load-bearing guard
             {
                 data = resource.GetComponent<StoragePriorityData>()
                        ?? resource.gameObject.AddComponent<StoragePriorityData>();
@@ -238,51 +278,7 @@ namespace ManifestDelivery.Patches
             _bucketItemKey.Clear();
             _dataByInstance.Clear();
             _reverseMapBuilt = false;
-        }
-    }
-
-    /// <summary>
-    /// Finds the storage building the player currently has selected, attaching
-    /// its priority component if it does not have one yet.
-    ///
-    /// Only called from the set-tier hotkey, so the scene scan happens on an
-    /// explicit keypress rather than on a timer. (An earlier build swept every
-    /// 5 s and caused a visible periodic hitch — never put FindObjectsOfType on
-    /// a repeating schedule.) Live components are checked first, so the scan is
-    /// skipped entirely for any storage the logistics system has already seen.
-    /// </summary>
-    internal static class StoragePrioritySelection
-    {
-        internal static StoragePriorityData? FindSelected()
-        {
-            // Fast path — already-tracked storages.
-            foreach (var data in StoragePriorityData.Live)
-            {
-                if (data == null) continue;
-                var sel = data.GetComponent<SelectableComponent>();
-                if (sel != null && sel.IsSelected) return data;
-            }
-
-            // Slow path — a storage the logistics system has not touched yet.
-            // Acceptable here: user-initiated, at most once per keypress.
-            try
-            {
-                foreach (var sb in UnityEngine.Object.FindObjectsOfType<StorageBuilding>())
-                {
-                    if (sb == null) continue;
-                    var sel = sb.GetComponent<SelectableComponent>();
-                    if (sel == null || !sel.IsSelected) continue;
-
-                    return sb.GetComponent<StoragePriorityData>()
-                           ?? sb.gameObject.AddComponent<StoragePriorityData>();
-                }
-            }
-            catch (Exception ex)
-            {
-                ManifestDeliveryMod.Log.Warning($"[MD][StoragePri] Selection lookup failed: {ex.Message}");
-            }
-
-            return null;
+            _disabledThisSession = false;
         }
     }
 }

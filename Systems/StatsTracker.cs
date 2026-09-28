@@ -204,7 +204,11 @@ namespace ManifestDelivery.Systems
 
         public static void EnsureLoadedForCurrentSave()
         {
-            string save = WagonShopEnhancement_GetActiveSaveNameSafe();
+            // "" = a brand-new town that has no save name yet: stats stay in
+            // memory, and OnGameSaved adopts them at the town's first save.
+            // Switching from "" to a real town here means a LOAD, so the
+            // unsaved town's stats are dropped (they belong to no save).
+            string save = ManifestDelivery.Components.WagonShopEnhancement.GetActiveSaveName();
             if (save == _loadedForSave) return;
 
             // Save changed (or first time) — save current data if there was any,
@@ -220,6 +224,26 @@ namespace ManifestDelivery.Systems
         }
 
         public static void SaveToDisk() => SaveToDisk(_loadedForSave);
+
+        /// <summary>
+        /// Called after the game writes a save. At a brand-new town's first
+        /// save, adopts the stats gathered before it had a name; otherwise
+        /// flushes the current town's stats.
+        /// </summary>
+        public static void OnGameSaved()
+        {
+            string save = ManifestDelivery.Components.WagonShopEnhancement.GetActiveSaveName();
+            if (string.IsNullOrEmpty(_loadedForSave) && !string.IsNullOrEmpty(save) && _shops.Count > 0)
+            {
+                _loadedForSave = save;
+                SaveToDisk(save);
+                ManifestDeliveryMod.Log.Msg(
+                    $"[MD][Stats] New town '{save}' saved for the first time — kept stats for {_shops.Count} shop(s).");
+                return;
+            }
+            EnsureLoadedForCurrentSave();
+            SaveToDisk();
+        }
 
         public static void SaveToDisk(string saveName)
         {
@@ -437,23 +461,6 @@ namespace ManifestDelivery.Systems
             // Final fallback — game directory + UserData
             return _userDataDirCached = System.IO.Path.Combine(
                 System.AppDomain.CurrentDomain.BaseDirectory, "UserData");
-        }
-
-        private static string WagonShopEnhancement_GetActiveSaveNameSafe()
-        {
-            // Match WagonShopEnhancement.GetActiveSaveName via reflection so
-            // we don't duplicate the SaveManager lookup logic. Static method.
-            try
-            {
-                var mi = typeof(ManifestDelivery.Components.WagonShopEnhancement)
-                    .GetMethod("GetActiveSaveName",
-                        System.Reflection.BindingFlags.Static |
-                        System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic);
-                if (mi == null) return "";
-                return (mi.Invoke(null, null) as string) ?? "";
-            }
-            catch { return ""; }
         }
     }
 }
