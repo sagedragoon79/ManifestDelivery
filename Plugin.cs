@@ -188,7 +188,9 @@ namespace ManifestDelivery
                               "from the building window. Haulers deliver to higher-priority " +
                               "storages first. Affects DESTINATION choice only — it never makes " +
                               "a storage attractive to empty, so it cannot ping-pong goods " +
-                              "between storages. Default off.");
+                              "between storages. If you also run Storage Priorities by 3am, " +
+                              "set priorities in one mod only: both apply and add up. " +
+                              "Default off.");
 
             StoragePriorityStrength = cat.CreateEntry(
                 "StoragePriorityStrength", 300f,

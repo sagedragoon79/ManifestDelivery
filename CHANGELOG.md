@@ -23,7 +23,9 @@ All notable changes to this mod, newest first. Format follows
   - Turn it on in Keep Clarity under Manifest Delivery → Storage Priorities,
     where a Strength slider sets how far haulers will travel for priority.
   - Saved per settlement, and follows a storage that you relocate.
-  - Inspired by *Storage Priorities* by 3am.
+  - Inspired by *Storage Priorities* by 3am. If you run his mod too, set
+    priorities in one mod only: both apply, and their effects add up. MD
+    reminds you in the priority row's tooltip and in the log.
 - **Camp Multi-Pickup (experimental, off by default).** When a Camp wagon
   picks up a producer's output, it also stops at other camp producers of the
   same item nearby — including ones that aren't full yet — up to its carry

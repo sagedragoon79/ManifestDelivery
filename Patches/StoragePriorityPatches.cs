@@ -91,6 +91,58 @@ namespace ManifestDelivery.Patches
             }
         }
 
+        // ── Interop: Storage Priorities by 3am ───────────────────────────────
+        //
+        // His mod postfixes Resource.GetBaseScore too, and two postfixes add
+        // up: a storage prioritized in both mods gets both pulls. MD reads and
+        // changes nothing of his — it only tells the player, by assembly name.
+
+        private const string OtherModAssembly = "StoragePriorities";
+        private static bool? _otherModLoaded;
+        private static bool _warnedStacking;
+
+        /// <summary>
+        /// True when the separate Storage Priorities mod (by 3am) is loaded.
+        /// First asked on map load or later, when every mod assembly is in.
+        /// </summary>
+        internal static bool OtherModLoaded
+        {
+            get
+            {
+                if (_otherModLoaded.HasValue) return _otherModLoaded.Value;
+                bool found = false;
+                try
+                {
+                    foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        if (string.Equals(assembly.GetName().Name, OtherModAssembly,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                catch { /* treat as not installed */ }
+                _otherModLoaded = found;
+                return found;
+            }
+        }
+
+        /// <summary>
+        /// Logs once per session when both mods are steering deliveries. Called
+        /// when routing first applies a priority and when a storage window shows
+        /// MD's row, so it also fires if the feature is switched on mid-session.
+        /// </summary>
+        internal static void WarnIfStacking()
+        {
+            if (_warnedStacking || !IsActive || !OtherModLoaded) return;
+            _warnedStacking = true;
+            ManifestDeliveryMod.Log.Warning(
+                "[MD][StoragePri] Storage Priorities by 3am is also installed. Both mods steer " +
+                "deliveries, so priorities set in both add up. Set priorities in one mod only.");
+        }
+
         /// <summary>
         /// Storages that take part in priorities. Markets and trading posts are
         /// StorageBuildings too, but they stock goods for their own jobs; the UI
@@ -193,6 +245,7 @@ namespace ManifestDelivery.Patches
         private static void BuildReverseMap()
         {
             _reverseMapBuilt = true;
+            WarnIfStacking();   // routing is about to apply a priority for the first time
             try
             {
                 var gm = UnitySingleton<GameManager>.Instance;

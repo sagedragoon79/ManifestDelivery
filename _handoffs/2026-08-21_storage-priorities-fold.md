@@ -226,9 +226,15 @@ If built, it must be:
   `positionKey|itemKey|priority`, routing weight), removed the temporary K
   hotkey, and pulled the KC registration (master toggle + strength slider,
   both live) forward from M3 so the feature can be switched on in-game.
-- **M3 — Polish.** Storage Priorities (3am) soft-dep check: detect his mod, log
-  a warning, and default ours off. Consider copying priorities with vanilla's
-  building settings copy/paste (`ClonerPaste`).
+- **M3 — Polish.** **Soft-dep check BUILT and user-tested 2026-09-30** (warning fired once with his v1.3.2 loaded; no errors).
+  `StoragePriorityPatches.OtherModLoaded` finds his mod by assembly name
+  (`StoragePriorities`; MelonInfo "Storage Priorities" by 3am) — nothing of his is
+  read or changed. `WarnIfStacking()` logs once per session when MD's feature is
+  active and his mod is loaded (called when routing first applies a priority and
+  when a storage window shows MD's row). The priority row's tooltip and the two
+  setting descriptions say the same: set priorities in one mod only, because both
+  postfixes add up. Ours already defaults to off. Still open: copying priorities
+  with vanilla's building settings copy/paste (`ClonerPaste`).
 - **M4 (optional) — Rebalancer**, under the constraints above.
 
 ## Verification

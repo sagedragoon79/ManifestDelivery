@@ -189,7 +189,8 @@ namespace ManifestDelivery
                     "Set it for the whole storage in the building window, or per item by clicking " +
                     "an item's icon. Haulers deliver to higher-priority storages first. It only " +
                     "chooses where goods go, never pulls them back out, so goods can't bounce " +
-                    "between storages."));
+                    "between storages. If you also run Storage Priorities by 3am, set priorities " +
+                    "in one mod only: both apply and add up."));
             Reg("Storage Priorities", ManifestDeliveryMod.StoragePriorityStrength,
                 NewMeta("Priority Strength", min: 50f, max: 800f,
                     tooltip: "Routing points that priority 9 adds and priority 1 subtracts; each step " +

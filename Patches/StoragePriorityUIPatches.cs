@@ -256,6 +256,7 @@ namespace ManifestDelivery.Patches
                 view.transform.SetAsFirstSibling();
                 view.gameObject.SetActive(true);
                 Refresh(view);
+                StoragePriorityPatches.WarnIfStacking();
             }
             catch (Exception ex)
             {
@@ -642,6 +643,12 @@ namespace ManifestDelivery.Patches
                 sb.Append("\n<i>Applies to every item this storage accepts. Click an item's icon " +
                           "to give that item its own priority.</i>");
             }
+
+            // Both mods steer deliveries and their pulls add up (see
+            // StoragePriorityPatches interop). Say so where priorities are set.
+            if (StoragePriorityPatches.OtherModLoaded)
+                sb.Append("\n<color=#E8B34A>Storage Priorities by 3am is also installed. " +
+                          "Priorities set in both mods add up, so set them in one mod only.</color>");
             return sb.ToString();
         }
 
