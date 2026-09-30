@@ -273,6 +273,10 @@ namespace ManifestDelivery.Tasks
                 // vanilla already routes the wagon there (storage quota work).
                 if (assignedRequesters.Contains(requester)) continue;
 
+                // Trading Post stock belongs to Hub Stocks Trading Post
+                // (HubHaulSearchEntry); a backhaul never claims it.
+                if (requester.owner is TradingPost) continue;
+
                 // Check that at least one active request is eligible.
                 // In Camp mode, we prioritize firewood + food backhauls to camp residences
                 // (delivery requests) with a relaxed threshold.

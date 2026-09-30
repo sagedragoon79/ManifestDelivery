@@ -19,11 +19,13 @@ namespace ManifestDelivery.Systems
     ///   latched save name that fixed MD v1.0.16/1.0.18 (a transiently-empty
     ///   <c>SaveManager.activeSaveFileName</c> used to send writes to
     ///   default.txt while reads came from the real file).
-    /// - **Position keys losing settings on relocation** → live tiers ride on a
-    ///   <see cref="StoragePriorityData"/> component attached to the building, and
+    /// - **Position keys losing settings on relocation** → the game relocates
+    ///   by constructing a NEW building at the destination, so
+    ///   <see cref="CarryTo"/> (called from RelocationPatches when the move is
+    ///   confirmed) copies the priorities to the destination's key. Live
+    ///   priorities ride on a <see cref="StoragePriorityData"/> component, and
     ///   <see cref="SyncFromLive"/> merges each building into the on-disk map at
-    ///   its CURRENT position immediately before writing. A relocated building is
-    ///   simply saved under its new key.
+    ///   its CURRENT position immediately before writing.
     ///
     /// Format (one row per building/item, '|' separated):
     ///   <c>positionKey|itemKey|priority</c>   itemKey -1 = storage-wide priority,
@@ -116,6 +118,55 @@ namespace ManifestDelivery.Systems
             catch (Exception ex)
             {
                 ManifestDeliveryMod.Log.Warning($"[MD][StoragePri] Restore failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Keeps a storage's priorities when you relocate it. The game takes the
+        /// building down and constructs a new one at the destination, which
+        /// restores by ITS position and would find nothing. Called when you
+        /// confirm the move (RelocationPatches); the next game save writes it.
+        /// "Nothing set" is carried too, so an old entry at the destination
+        /// (from a demolished storage) can't leak into the moved one.
+        /// </summary>
+        public static void CarryTo(GameObject building, Vector3 destination)
+        {
+            if (building == null) return;
+            try
+            {
+                EnsureLoadedForCurrentSave();
+
+                // The live component when it has restored; otherwise the saved
+                // row, since components attach lazily and an untouched storage
+                // may not have one yet.
+                Dictionary<int, int>? source = null;
+                var data = building.GetComponent<StoragePriorityData>();
+                if (data != null && data.Restored)
+                {
+                    source = new Dictionary<int, int>();
+                    foreach (var kv in data.PrioritiesRO) source[kv.Key] = kv.Value;
+                }
+                else if (_byKey.TryGetValue(ComputeKey(building.transform.position), out var saved))
+                {
+                    source = saved;
+                }
+
+                bool any = source != null && source.Count > 0;
+                foreach (int key in WagonShopEnhancement.KeysNear(destination))
+                {
+                    if (any) _byKey[key] = new Dictionary<int, int>(source!);
+                    else _byKey.Remove(key);
+                }
+
+                if (any)
+                    ManifestDeliveryMod.Log.Msg(
+                        $"[MD][StoragePri] {building.name} relocating: keeping {source!.Count} priority " +
+                        $"setting(s) for the new site at ({destination.x:F1},{destination.z:F1}).");
+            }
+            catch (Exception ex)
+            {
+                ManifestDeliveryMod.Log.Warning(
+                    $"[MD][StoragePri] Carrying priorities to a relocated storage failed: {ex.Message}");
             }
         }
 

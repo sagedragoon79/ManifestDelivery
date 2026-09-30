@@ -16,9 +16,9 @@ namespace ManifestDelivery.Patches
     [HarmonyPatch(typeof(TransportWagon), nameof(TransportWagon.ItemBundleDroppedOff))]
     internal static class TransportWagonDropOffPatch
     {
-        // Simple dedupe — the game calls ItemBundleDroppedOff twice per drop-off
-        // (once from the wagon side, once from the destination side). Suppress
-        // the second call when we see the same bundle reference within 200ms.
+        // Simple dedupe — this postfix ran twice per drop-off while MD's patches
+        // were applied twice (fixed 2026-09-30, Plugin.cs). Kept as a guard:
+        // suppress a repeat of the same bundle reference within 200ms.
         private static readonly System.Collections.Generic.Dictionary<int, float>
             _lastLogTime = new System.Collections.Generic.Dictionary<int, float>();
 

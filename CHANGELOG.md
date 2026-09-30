@@ -38,8 +38,30 @@ All notable changes to this mod, newest first. Format follows
   longer cross town for a handful of items. Camp supplies for camp homes are
   exempt, and with Camp Multi-Pickup on, a Camp wagon counts the same item at
   nearby camp producers toward the minimum.
+- **Hub Stocks Trading Post (experimental, off by default).** Hub wagons help
+  stock Trading Posts inside their work radius. When a post is short of a good
+  you set a stock target for, a Hub wagon collects the good from storage, up to
+  a full load, and delivers it to the post, the way the post's traders do.
+  A wagon goes only when the shortfall, and the good actually in storage
+  around town, both meet Minimum Wagon Load, so the traders still handle small
+  top-ups and scarce goods. Turn it on in Keep Clarity under Manifest
+  Delivery → Camp & Hub.
 
 ### Fixed
+- **Every Manifest Delivery patch ran twice.** MelonLoader applies a mod's
+  patches on its own, and MD applied them again, so the bonuses compounded:
+  Camp wagons moved 56% faster (listed as 25%), Hub wagons moved 19% slower
+  (listed as 10%) and carried 44% more (listed as 20%), and the Storage Cart
+  speed setting was squared (1.5 moved carts at 2.25×). MD now patches once.
+  Camp and Hub wagons keep the speed and capacity you've been playing with,
+  and the mode tooltips now show those numbers. The Storage Cart now moves at
+  exactly the speed you set, so raise the setting to keep the old speed (2.25
+  for the default 1.5). Wagons also stop running MD's work searches twice.
+- **A relocated Wagon Shop went back to Standard.** The game relocates a
+  building by constructing a new one at the destination, and MD remembers a
+  shop's mode by its position, so the rebuilt shop found no saved mode. MD now
+  saves the mode for the new site when you confirm the move. Storage
+  priorities carry over the same way.
 - **Wagons stayed tied to buildings they claimed long ago.** MD claimed work
   for wagons even while they were already hauling, and rarely released those
   claims, so over a session each wagon stayed attached to most buildings it had

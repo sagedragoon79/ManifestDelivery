@@ -330,6 +330,44 @@ namespace ManifestDelivery.Components
         private int GetShopKey() => ComputeShopKey(transform.position);
 
         /// <summary>
+        /// The keys a building constructed at <paramref name="pos"/> could get.
+        /// Buildings sit on half-units (757.5), exactly where RoundToInt flips,
+        /// so a building placed a hair either side of the planned spot would
+        /// otherwise miss a key written in advance. Usually one key, at most four.
+        /// </summary>
+        internal static List<int> KeysNear(Vector3 pos)
+        {
+            const float Jitter = 0.01f;
+            var keys = new List<int>(4);
+            foreach (float dx in new[] { -Jitter, Jitter })
+                foreach (float dz in new[] { -Jitter, Jitter })
+                {
+                    int key = ComputeShopKey(new Vector3(pos.x + dx, pos.y, pos.z + dz));
+                    if (!keys.Contains(key)) keys.Add(key);
+                }
+            return keys;
+        }
+
+        /// <summary>
+        /// Keeps this shop's mode when you relocate it. The game relocates by
+        /// taking this building down and constructing a new one at the
+        /// destination, which would restore its mode by ITS position and find
+        /// nothing. Called when you confirm the move (RelocationPatches), this
+        /// writes the mode under the destination's key. The entry at the old
+        /// spot stays, so a cancelled move keeps its mode too.
+        /// </summary>
+        internal void CarryModeTo(Vector3 destination)
+        {
+            EnsureLoadedForCurrentSave();
+            foreach (int key in KeysNear(destination))
+                SavedModes[key] = _mode;
+            SaveModesToDisk();
+            ManifestDeliveryMod.Log.Msg(
+                $"[MD] {gameObject.name} relocating: keeping '{ModeDisplayName}' for the new site at " +
+                $"({destination.x:F1},{destination.z:F1}).");
+        }
+
+        /// <summary>
         /// Public lookup used by early-boot patches (before our enhancement
         /// component exists on the shop). Returns the saved mode for the
         /// given world position, or null if this shop hasn't been saved.

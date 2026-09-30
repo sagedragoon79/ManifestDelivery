@@ -35,6 +35,14 @@ namespace ManifestDelivery.Tasks
     ///   HubHaul serves ANY request in radius (distribution + collection). The
     ///   two never run on the same wagon — they're gated on different modes.
     ///
+    /// TRADING POSTS (Hub Stocks Trading Post, experimental):
+    ///   A post's stock work is a Deliver request into its trader storage,
+    ///   assigned only to the post's own traders, so no wagon serves it unless
+    ///   MD claims it. With the setting on, HubHaul claims the post's largest
+    ///   stock shortfall that meets Minimum Wagon Load — that one request, so
+    ///   vanilla's Deliver route gathers the good from storage up to capacity.
+    ///   Posts are never claimed any other way (ReturnTrip skips them too).
+    ///
     /// COOLDOWN:
     ///   Scans at most once every 1.5 s per wagon (NextHubHaulScanTime gate).
     /// </summary>
@@ -101,7 +109,7 @@ namespace ManifestDelivery.Tasks
             // ── Find the best requester anywhere in the Hub radius ────────────
             Vector3 diagShopPos = shop.transform.position;
             float   diagRadius  = shop.WorkRadius;
-            LogisticsRequester? best = FindBestHubRequester();
+            LogisticsRequester? best = FindBestHubRequester(out ItemRequest? stockRequest);
             if (best == null)
             {
                 // Log only on the transition finding → empty so an idle hub
@@ -124,7 +132,24 @@ namespace ManifestDelivery.Tasks
                 bool multiSource = ManifestDeliveryMod.HubMultiSourcePickup != null
                                    && ManifestDeliveryMod.HubMultiSourcePickup.Value;
 
-                if (multiSource)
+                if (stockRequest != null)
+                {
+                    // Trading Post stock: claim just that request. Like a
+                    // multi-source claim, it routes through FindBestRouteDeliver,
+                    // which gathers the good from storage up to capacity.
+                    _data.ClaimRequest(_wagon, stockRequest, hubHerd: true);
+
+                    if (ManifestDeliveryMod.IsVerbose)
+                    {
+                        string item = stockRequest is SingleItemRequest single ? single.itemID.ToString() : "?";
+                        ManifestDeliveryMod.LogVerbose(
+                            $"[MD] HubHaul CLAIM (Trading Post stock): {_wagon.name} → " +
+                            $"{best.gameObject.name} [{item}×{stockRequest.GetTotalUnreservedCount()} short] " +
+                            $"({Vector3.Distance(_wagon.transform.position, best.transform.position):F1}u from wagon, " +
+                            $"{Vector3.Distance(diagShopPos, best.transform.position):F0}u from hub)");
+                    }
+                }
+                else if (multiSource)
                 {
                     // Multi-source mode: claim ONLY the specific DELIVER request,
                     // via the per-request LogisticsRequest.AssignWorker overload —
@@ -183,8 +208,14 @@ namespace ManifestDelivery.Tasks
 
         // ── Private helpers ───────────────────────────────────────────────────
 
-        private LogisticsRequester? FindBestHubRequester()
+        /// <summary>
+        /// The nearest requester (to the wagon) with work for this wagon. When
+        /// that's a Trading Post, <paramref name="stockRequest"/> is the stock
+        /// request to claim; otherwise it's null.
+        /// </summary>
+        private LogisticsRequester? FindBestHubRequester(out ItemRequest? stockRequest)
         {
+            stockRequest = null;
             WagonShopEnhancement? shop = _data.ShopEnhancement;
             if (shop == null) return null;
 
@@ -202,6 +233,8 @@ namespace ManifestDelivery.Tasks
 
             bool multiSource = ManifestDeliveryMod.HubMultiSourcePickup != null
                                && ManifestDeliveryMod.HubMultiSourcePickup.Value;
+            bool stockPosts = ManifestDeliveryMod.HubStockTradingPost != null
+                              && ManifestDeliveryMod.HubStockTradingPost.Value;
 
             LogisticsRequester? bestRequester = null;
             float bestDistSqr = float.MaxValue;
@@ -214,6 +247,25 @@ namespace ManifestDelivery.Tasks
                 // Within the Hub service radius (matches the visual circle).
                 float distSqr = (requester.transform.position - shopPos).sqrMagnitude;
                 if (distSqr > radiusSqr) continue;
+
+                // Trading Posts: only their stock work, and only with Hub Stocks
+                // Trading Post on. Checked before the assignment test because
+                // vanilla may assign every wagon to the post's storage-side
+                // requests, which says nothing about its stock requests.
+                if (requester.owner is TradingPost post)
+                {
+                    if (!stockPosts) continue;
+                    ItemRequest? stock = GetTradingPostStockRequest(requester, post);
+                    if (stock == null) continue;
+                    float postDistSqr = (requester.transform.position - _wagon.transform.position).sqrMagnitude;
+                    if (postDistSqr < bestDistSqr)
+                    {
+                        bestDistSqr   = postDistSqr;
+                        bestRequester = requester;
+                        stockRequest  = stock;
+                    }
+                    continue;
+                }
 
                 // Skip if this wagon is already assigned here.
                 if (assignedRequesters.Contains(requester)) continue;
@@ -240,11 +292,89 @@ namespace ManifestDelivery.Tasks
                 {
                     bestDistSqr  = wagonDistSqr;
                     bestRequester = requester;
+                    stockRequest  = null;
                 }
             }
 
             return bestRequester;
         }
+
+        /// <summary>
+        /// The Trading Post's largest stock shortfall this wagon may take, or
+        /// null. Stock requests deliver into the post's trader storage
+        /// (TradingPost.CheckWorkAvailabilityForTraderStockingItem): the target
+        /// you set minus what's there, with no bulk minimum. The traders and a
+        /// claimed wagon share the request, and its reservations keep them from
+        /// bringing more than the shortfall.
+        /// </summary>
+        private ItemRequest? GetTradingPostStockRequest(LogisticsRequester requester, TradingPost post)
+        {
+            if (post.traderStorage == null) return null;
+            float minLoad  = ClaimHelpers.MinLoadWeight(_wagon);
+            float capacity = _wagon.GetCarryCapacity();
+            ItemRequest? best = null;
+            float bestLoad = 0f;
+            foreach (var kv in requester.activeDeliveryRequests)
+            {
+                ItemRequest request = kv.Value;
+                if (!(request is SingleItemRequest single)) continue;
+                if (!ReferenceEquals(request.storageForAction, post.traderStorage)) continue;
+                if (_wagon.logisticsAssignment.GetAssignedPriorityForRequest(
+                        request, LogisticsAssignment.AssignmentCategory.Default, out _)) continue;
+                if (!PassesBulkCheck(request)) continue;
+
+                // What one trip can actually bring: the shortfall, capped by the
+                // good's unreserved stock around town. The shortfall alone sent
+                // wagons across town for 1–3 spice when the target was big but
+                // the town barely had any.
+                float load = ClaimHelpers.RequestLoadWeight(request);
+                if (load <= 0f || load < minLoad) continue;
+                load = Mathf.Min(load, AvailableWeight(single.itemID, post.traderStorage));
+                if (load <= 0f || load < minLoad) continue;
+
+                // Herd guard in wagon loads: the item-count guard assumed ~100
+                // items a load, but a wagon carries 1,700+ light goods, so
+                // several wagons piled onto one shortfall and all but the
+                // first found scraps.
+                if (capacity > 0f && HubClaimCount(request) >= Mathf.CeilToInt(load / capacity)) continue;
+
+                if (load > bestLoad)
+                {
+                    bestLoad = load;
+                    best = request;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Weight of <paramref name="itemID"/> the game could route to a post
+        /// right now: the unreserved stock in every container holding it — the
+        /// same "has item" bucket the route search draws from — minus the
+        /// post's own trader storage.
+        /// </summary>
+        private static float AvailableWeight(ItemID itemID, IContainsItems exclude)
+        {
+            var wbm = UnitySingleton<GameManager>.Instance?.workBucketManager;
+            if (wbm?.itemByItemIDRO == null
+                || !wbm.itemByItemIDRO.TryGetValue(itemID, out Item item) || item == null)
+                return 0f;
+            WorkBucket bucket = wbm.GetHasItemWorkBucketByItem(wbm, item);
+            if (bucket == null) return 0f;
+
+            uint total = 0;
+            foreach (IRegistersForWork holder in bucket.workObjsRO)
+            {
+                if (holder.IsNull()) continue;
+                ReservableItemStorage storage = holder.GetStorageForContainer(bucket);
+                if (storage == null || ReferenceEquals(storage, exclude)) continue;
+                total += storage.GetNumberOfUnreservedItems(item);
+            }
+            return total * item.weight;
+        }
+
+        private static int HubClaimCount(ItemRequest request) =>
+            _hubClaimCounts.TryGetValue(request, out int n) ? n : 0;
 
         /// <summary>
         /// Returns true when the requester has at least one delivery or move-out

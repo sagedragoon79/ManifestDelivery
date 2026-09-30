@@ -42,9 +42,9 @@ namespace ManifestDelivery.Patches
         private static readonly MethodInfo? _subTasksGetter =
             AccessTools.PropertyGetter(typeof(Task), "subTasks");
 
-        // The same task can reach OnSearchSuccess twice (observed 2026-09-28:
-        // every haul logged twice at the same millisecond), so remember the
-        // last one dumped.
+        // Every haul logged twice at the same millisecond (2026-09-28) because
+        // MD's patches were applied twice (fixed 2026-09-30, Plugin.cs). Kept
+        // as a guard: remember the last task dumped.
         private static LogisticsTask? _lastDumped;
 
         private static void Postfix(LogisticsTask __instance)

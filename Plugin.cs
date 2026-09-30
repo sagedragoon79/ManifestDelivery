@@ -5,6 +5,10 @@ using UnityEngine;
 // MelonLoader mod registration attributes (assembly-level)
 [assembly: MelonInfo(typeof(ManifestDelivery.ManifestDeliveryMod), "Manifest Delivery", "1.0.21", "SageDragoon")]
 [assembly: MelonGame("Crate Entertainment", "Farthest Frontier")]
+// MelonLoader applies a mod's [HarmonyPatch] classes by itself unless told not
+// to. MD also calls PatchAll (after its preferences exist), so every attribute
+// patch ran twice: bonuses compounded and each postfix fired twice.
+[assembly: HarmonyDontPatchAll]
 
 namespace ManifestDelivery
 {
@@ -31,6 +35,7 @@ namespace ManifestDelivery
         public static MelonPreferences_Entry<bool>  CampHaulEnabled { get; private set; } = null!;
         public static MelonPreferences_Entry<bool>  HubHaulEnabled  { get; private set; } = null!;
         public static MelonPreferences_Entry<bool>  HubMultiSourcePickup { get; private set; } = null!;
+        public static MelonPreferences_Entry<bool>  HubStockTradingPost  { get; private set; } = null!;
         public static MelonPreferences_Entry<int>   MinLoadPercent          { get; private set; } = null!;
         public static MelonPreferences_Entry<bool>  CampMultiPickup         { get; private set; } = null!;
         public static MelonPreferences_Entry<int>   CampMultiPickupMaxStops { get; private set; } = null!;
@@ -186,13 +191,13 @@ namespace ManifestDelivery
                               "between storages. Default off.");
 
             StoragePriorityStrength = cat.CreateEntry(
-                "StoragePriorityStrength", 150f,
+                "StoragePriorityStrength", 300f,
                 display_name: "Storage Priority — Strength",
                 description:  "How hard priority pulls, in routing score points: priority 9 adds " +
                               "this much, 1 subtracts it, and each step from 5 is a quarter of " +
                               "it. Calibration: vanilla score is 0-100 (emptier ranks higher) and " +
-                              "distance subtracts ~1 point per world unit, so at 150 a priority-9 " +
-                              "storage wins over an equally full one ~150u closer. Granary/Root " +
+                              "distance subtracts ~1 point per world unit, so at 300 a priority-9 " +
+                              "storage wins over an equally full one ~300u closer. Granary/Root " +
                               "Cellar/Treasury carry a built-in +100. Priorities above 5 fade " +
                               "automatically as the storage fills.");
 
@@ -264,6 +269,16 @@ namespace ManifestDelivery
                               "near-empty pickup per trip. Hub mode only (Camp is unaffected). " +
                               "Default false — flip on to test, watch Haul Diagnostics for " +
                               "multi-PICKUP hauls.");
+
+            HubStockTradingPost = cat.CreateEntry(
+                "HubStockTradingPost", false,
+                display_name: "Hub Stocks Trading Post (experimental)",
+                description:  "EXPERIMENTAL. When true, Hub-mode wagons help stock Trading " +
+                              "Posts inside the Hub work radius. When a post is short of a good " +
+                              "you set a stock target for, a Hub wagon collects the good from " +
+                              "storage and delivers it to the post, the way the post's traders " +
+                              "do. Wagons take only shortfalls that meet Minimum Wagon Load; the " +
+                              "traders still handle small top-ups. Default false.");
 
             // ── Wagon efficiency ─────────────────────────────────────────────
             MinLoadPercent = cat.CreateEntry(
@@ -370,6 +385,8 @@ namespace ManifestDelivery
                 LoggerInstance.Warning($"[MD] Could not parse StatsReportKey \"{StatsReportKey.Value}\", defaulting to M.");
 
             // ── Apply Harmony patches ────────────────────────────────────────
+            // The only place attribute patches are applied — see
+            // [assembly: HarmonyDontPatchAll] at the top of this file.
             HarmonyInstance.PatchAll();
 
             // Manual Harmony patch for mode buttons — matches TW's working
@@ -377,6 +394,7 @@ namespace ManifestDelivery
             // silent-failure issues).
             Patches.ModeButtonPatches.Register(HarmonyInstance);
             Patches.SaveHooks.Register(HarmonyInstance);
+            Patches.RelocationPatches.Register(HarmonyInstance);
             Patches.StoragePriorityUIPatches.Register(HarmonyInstance);
             Patches.WagonSelectButtonPatches.Register(HarmonyInstance);
             Patches.WagonShopAwakePrefix.Register(HarmonyInstance);

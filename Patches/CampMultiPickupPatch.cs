@@ -73,7 +73,8 @@ namespace ManifestDelivery.Patches
                 var shop = data != null ? data.ResolveShopEnhancement(wagon) : null;
                 if (shop == null || shop.Mode != ShopMode.Camp) return;
 
-                // The same task can reach OnSearchSuccess twice; augment it once.
+                // Augment a task once, even if this postfix runs twice for it
+                // (it did while MD's patches were applied twice).
                 if (_processed.TryGetValue(__instance, out _)) return;
                 _processed.Add(__instance, Marker);
 

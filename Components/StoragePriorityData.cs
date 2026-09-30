@@ -18,12 +18,14 @@ namespace ManifestDelivery.Components
     /// changes another.
     ///
     /// WHY A COMPONENT, NOT A LOOKUP TABLE: priorities live on the building
-    /// itself, so **relocation is free** — the data physically moves with the
-    /// GameObject. Position is used solely as the on-disk key, written from the
-    /// building's CURRENT position at save time, so a relocated building simply
-    /// persists under its new key. (The handoff suggested keying on "the save
-    /// GUID / instance identity that MD's mode persistence already uses" — that
-    /// was wrong: <c>WagonShopEnhancement</c> keys on a position hash.)
+    /// itself; position is used solely as the on-disk key, written from the
+    /// building's CURRENT position at save time. Relocation is NOT free,
+    /// though: the game relocates by constructing a NEW building at the
+    /// destination and destroying this one, so RelocationPatches copies the
+    /// priorities to the destination's key when the move is confirmed.
+    /// (The handoff suggested keying on "the save GUID / instance identity that
+    /// MD's mode persistence already uses" — that was wrong:
+    /// <c>WagonShopEnhancement</c> keys on a position hash.)
     /// </summary>
     public class StoragePriorityData : MonoBehaviour
     {

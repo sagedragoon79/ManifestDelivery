@@ -136,6 +136,12 @@ namespace ManifestDelivery
                     "Hub wagons claim only Deliver/restock requests (the specific request, not the whole building), " +
                     "so one wagon fans across several source storages up to capacity instead of one near-empty pickup. " +
                     "Hub mode only. Off by default — experimental."));
+            Reg("Camp & Hub", ManifestDeliveryMod.HubStockTradingPost,
+                NewMeta("Hub Stocks Trading Post (experimental)",
+                    "Hub wagons help stock Trading Posts in their radius: they bring goods you set a stock target " +
+                    "for from storage, like the post's traders do. Only shortfalls that meet Minimum Wagon Load; " +
+                    "traders still handle small top-ups. Off by default — experimental.",
+                    visibleWhen: () => ManifestDeliveryMod.HubHaulEnabled.Value));
             Reg("Camp & Hub", ManifestDeliveryMod.CampWorkRadius,
                 NewMeta("Camp Work Radius", min: 50f, max: 250f,
                     tooltip: "Default 120u covers a typical remote camp"));
@@ -185,9 +191,9 @@ namespace ManifestDelivery
                     "chooses where goods go, never pulls them back out, so goods can't bounce " +
                     "between storages."));
             Reg("Storage Priorities", ManifestDeliveryMod.StoragePriorityStrength,
-                NewMeta("Priority Strength", min: 25f, max: 400f,
+                NewMeta("Priority Strength", min: 50f, max: 800f,
                     tooltip: "Routing points that priority 9 adds and priority 1 subtracts; each step " +
-                             "from 5 is a quarter of this. About 1 point per unit of travel. Default 150.",
+                             "from 5 is a quarter of this. About 1 point per unit of travel. Default 300.",
                     visibleWhen: () => ManifestDeliveryMod.StoragePriorityEnabled.Value));
 
             // === Hotkeys ===

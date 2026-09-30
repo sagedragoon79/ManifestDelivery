@@ -308,14 +308,14 @@ namespace ManifestDelivery.Patches
                     return "<b>Camp Shop</b>\n" +
                            $"Max wagons: {ManifestDeliveryMod.MaxWagonsCamp.Value}\n" +
                            $"Work radius: {ManifestDeliveryMod.CampWorkRadius.Value:F0}u\n" +
-                           "Speed: +25%\n" +
+                           "Speed: +56%\n" +
                            "<i>Local logistics hub — wagons proactively haul from " +
                            "producers inside the ring to main-town storage.</i>";
                 case ShopMode.Hub:
                     return "<b>Hub Shop</b>\n" +
                            $"Max wagons: {ManifestDeliveryMod.MaxWagonsHub.Value}\n" +
                            $"Work radius: {ManifestDeliveryMod.HubWorkRadius.Value:F0}u\n" +
-                           "Capacity: +20%  Speed: -10%\n" +
+                           "Capacity: +44%  Speed: -19%\n" +
                            "<i>Town distribution — wagons serve deliveries and pickups " +
                            "anywhere in the work radius, and help carry water to " +
                            "building fires.</i>";

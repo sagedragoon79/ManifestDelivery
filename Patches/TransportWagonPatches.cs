@@ -132,7 +132,7 @@ namespace ManifestDelivery.Patches
                 ? newWagonShopAssignedTo.GetComponent<WagonShopEnhancement>()
                 : null;
 
-            // Hub's +20% capacity comes from the shop's mode, so a newly built
+            // Hub's +44% capacity comes from the shop's mode, so a newly built
             // or newly paired wagon needs its capacity recalculated here —
             // otherwise it only changed on a mode switch or a tech unlock.
             __instance.CalculateCarryCapacity();
@@ -228,9 +228,13 @@ namespace ManifestDelivery.Patches
 
         // ── 8. Mode-based speed modifier ─────────────────────────────────────
         //
-        //  Camp mode: +25% speed (long hauls on open roads)
-        //  Hub mode:  -10% speed (heavy loads, short trips)
+        //  Camp mode: +56% speed (long hauls on open roads)
+        //  Hub mode:  -19% speed (heavy loads, short trips)
         //  Standard:  no change
+        //
+        //  Designed as +25% / -10%, but MD's patches were applied twice until
+        //  2026-09-30, so players got 1.25² and 0.90². Those are the values
+        //  everyone played with, so they're now applied once, on purpose.
 
         [HarmonyPostfix]
         [HarmonyPatch(typeof(TransportWagon), "get_movementSpeed")]
@@ -243,8 +247,8 @@ namespace ManifestDelivery.Patches
 
             float multiplier = data.ShopEnhancement.Mode switch
             {
-                Components.ShopMode.Camp => 1.25f,   // +25% speed
-                Components.ShopMode.Hub  => 0.90f,   // -10% speed
+                Components.ShopMode.Camp => 1.5625f, // +56% speed (1.25²)
+                Components.ShopMode.Hub  => 0.81f,   // -19% speed (0.90²)
                 _                        => 1.0f,
             };
 
@@ -254,7 +258,8 @@ namespace ManifestDelivery.Patches
 
         // ── 9. Mode-based capacity modifier ──────────────────────────────────
         //
-        //  Hub mode: +20% carry capacity (bulk hauler)
+        //  Hub mode: +44% carry capacity (bulk hauler) — 1.20², the value
+        //  players had while MD's patches were applied twice (see §8)
         //  Other modes: no change
         //
         //  Runs after CalculateCarryCapacity sets the base + tech multiplier.
@@ -268,12 +273,12 @@ namespace ManifestDelivery.Patches
 
             if (data.ShopEnhancement.Mode == Components.ShopMode.Hub)
             {
-                // Apply +20% on top of the already-calculated capacity.
+                // Apply +44% on top of the already-calculated capacity.
                 // TransportWagon.temporaryInventory is public; ItemStorage.carryCapacity
                 // is a public property with setter. No reflection needed.
                 var inv = __instance.temporaryInventory;
                 if (inv != null)
-                    inv.carryCapacity *= 1.20f;
+                    inv.carryCapacity *= 1.44f;
             }
         }
     }

@@ -62,7 +62,7 @@ namespace ManifestDelivery.Tasks
         private static readonly HashSet<string> StorageBuildingTags = new HashSet<string>
         {
             "Stockyard", "StorageDepot", "Storehouse", "RootCellar",
-            "MarketBuilding", "SupplyWagon", "Treasury"
+            "MarketBuilding", "SupplyWagon", "Treasury", "TradingPost"
         };
 
         public CampHaulSearchEntry(TransportWagon wagon, WagonEnhancementData data)
