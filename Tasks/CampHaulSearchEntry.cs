@@ -40,6 +40,16 @@ namespace ManifestDelivery.Tasks
         private readonly TransportWagon _wagon;
         private readonly WagonEnhancementData _data;
         private readonly HashSet<LogisticsRequester> _assignedBuffer = new HashSet<LogisticsRequester>();
+        private readonly List<LogisticsRequester> _campProducers = new List<LogisticsRequester>();
+
+        // Output waiting at camp producers, full or not — what Camp Multi-Pickup
+        // can collect as extra stops. Filled per scan only when pooling is on.
+        private readonly List<ProducerStock> _campStock = new List<ProducerStock>();
+
+        // The last scan's thresholds, so the claim applies the same test.
+        private float _scanMinLoad;
+        private bool _scanPooled;
+        private float _scanDetourSqr;
 
         private const int PriorityModifier = 2;
         // Short cooldown so wagons claim camp-zone move-out requests FAST —
@@ -135,7 +145,12 @@ namespace ManifestDelivery.Tasks
             // ── Claim the source's active requests for this wagon ───────────
             try
             {
-                _data.ClaimRequester(_wagon, bestSource);
+                // Only its worthwhile OUTPUT. Claiming the whole building also
+                // claimed its input deliveries, and vanilla would then serve a
+                // 5-coal restock for a camp Foundry instead of its iron output.
+                _data.ClaimRequester(_wagon, bestSource,
+                    request => request.action == ItemAction.TakeOut
+                               && IsWorthwhileMoveOut(bestSource, request, _scanMinLoad, _scanPooled, _scanDetourSqr));
 
                 if (ManifestDeliveryMod.IsVerbose)
                 {
@@ -177,10 +192,10 @@ namespace ManifestDelivery.Tasks
             float radiusSqr = shop.WorkRadius * shop.WorkRadius;
             Vector3 shopPos = shop.transform.position;
 
-            LogisticsRequester? bestRequester = null;
-            float bestDistSqr = float.MaxValue;
             var assignedRequesters = ClaimHelpers.CollectAssignedRequesters(_wagon, _assignedBuffer);
 
+            // Pass 1: every camp producer with output waiting.
+            _campProducers.Clear();
             foreach (LogisticsRequester requester in aggregator.activeStationaryRequestsRO)
             {
                 if (!requester.hasActiveRequests) continue;
@@ -190,18 +205,39 @@ namespace ManifestDelivery.Tasks
                 float distSqr = (requester.transform.position - shopPos).sqrMagnitude;
                 if (distSqr > radiusSqr) continue;
 
-                // Skip if wagon is already assigned here
-                if (assignedRequesters.Contains(requester)) continue;
-
                 // Skip storage buildings — camp wagons pick up from PRODUCTION
                 // buildings, not shuffle between storages
                 string tag = requester.gameObject.tag;
                 if (!string.IsNullOrEmpty(tag) && StorageBuildingTags.Contains(tag))
                     continue;
 
-                // Check bulk transport minimum on any move-out request
-                if (!HasBulkEligibleRequest(requester)) continue;
+                _campProducers.Add(requester);
+            }
 
+            // Pass 2: the producer nearest the shop whose output is worth a trip.
+            float minLoad = ClaimHelpers.MinLoadWeight(_wagon);
+            bool pooled = ManifestDeliveryMod.CampMultiPickup != null && ManifestDeliveryMod.CampMultiPickup.Value;
+            float detour = ManifestDeliveryMod.CampMultiPickupDetour != null
+                ? ManifestDeliveryMod.CampMultiPickupDetour.Value : 80f;
+            float detourSqr = detour * detour;
+            _scanMinLoad = minLoad;
+            _scanPooled = pooled;
+            _scanDetourSqr = detourSqr;
+            if (pooled && minLoad > 0f)
+                CampProducers.Collect(shopPos, shop.WorkRadius, _campStock);
+            else
+                _campStock.Clear();
+
+            LogisticsRequester? bestRequester = null;
+            float bestDistSqr = float.MaxValue;
+            foreach (LogisticsRequester requester in _campProducers)
+            {
+                // Skip if wagon is already assigned here
+                if (assignedRequesters.Contains(requester)) continue;
+
+                if (!HasWorthwhileMoveOut(requester, minLoad, pooled, detourSqr)) continue;
+
+                float distSqr = (requester.transform.position - shopPos).sqrMagnitude;
                 if (distSqr < bestDistSqr)
                 {
                     bestDistSqr  = distSqr;
@@ -213,16 +249,55 @@ namespace ManifestDelivery.Tasks
         }
 
         /// <summary>
-        /// Checks whether at least one move-out request passes the wagon's
-        /// bulk minimum restriction.
+        /// True when one of the producer's move-outs passes vanilla's bulk
+        /// minimum AND is worth a trip under Minimum Wagon Load. With Camp
+        /// Multi-Pickup on, the same item waiting at other camp producers within
+        /// the detour counts too — the wagon collects it on the way
+        /// (CampMultiPickupPatch).
         /// </summary>
-        private bool HasBulkEligibleRequest(LogisticsRequester requester)
+        private bool HasWorthwhileMoveOut(LogisticsRequester producer, float minLoad, bool pooled, float detourSqr)
         {
-            foreach (var kv in requester.activeMoveOutRequests)
-            {
-                if (PassesBulkCheck(kv.Value)) return true;
-            }
+            foreach (var kv in producer.activeMoveOutRequests)
+                if (IsWorthwhileMoveOut(producer, kv.Value, minLoad, pooled, detourSqr)) return true;
             return false;
+        }
+
+        /// <summary>The per-request test, shared by the scan and the claim.</summary>
+        private bool IsWorthwhileMoveOut(LogisticsRequester producer, ItemRequest request,
+            float minLoad, bool pooled, float detourSqr)
+        {
+            if (!PassesBulkCheck(request)) return false;
+            if (minLoad <= 0f) return true;
+
+            float load = ClaimHelpers.RequestLoadWeight(request);
+            if (load < minLoad && pooled && request is SingleItemRequest single)
+                load += NearbySameItemLoad(producer, single.itemID, detourSqr);
+            return load >= minLoad;
+        }
+
+        /// <summary>
+        /// Weight of <paramref name="itemID"/> waiting at other camp producers
+        /// (full or not) within the detour of <paramref name="origin"/>, counting
+        /// at most as many producers as a trip may add as extra stops.
+        /// </summary>
+        private float NearbySameItemLoad(LogisticsRequester origin, ItemID itemID, float detourSqr)
+        {
+            int maxStops = ManifestDeliveryMod.CampMultiPickupMaxStops != null
+                ? ManifestDeliveryMod.CampMultiPickupMaxStops.Value : 3;
+            float unitWeight = ClaimHelpers.ItemWeight(itemID);
+            if (unitWeight <= 0f) return 0f;
+            Vector3 originPos = origin.transform.position;
+            float total = 0f;
+            int stops = 0;
+            foreach (var stock in _campStock)
+            {
+                if (stops >= maxStops) break;
+                if (stock.Item != itemID || stock.Requester == origin) continue;
+                if ((stock.Position - originPos).sqrMagnitude > detourSqr) continue;
+                total += stock.Unreserved * unitWeight;
+                stops++;
+            }
+            return total;
         }
 
         /// <summary>

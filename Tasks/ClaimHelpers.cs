@@ -47,6 +47,57 @@ namespace ManifestDelivery.Tasks
             return true;
         }
 
+        // ── Minimum load ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Per-item weight for multi-item requests (food/fuel for homes), whose
+        /// items aren't exposed. Roughly a food item's weight.
+        /// </summary>
+        internal const float MultiItemWeightEstimate = 10f;
+
+        /// <summary>Weight of one unit of an item; 0 when unknown.</summary>
+        internal static float ItemWeight(ItemID itemID)
+        {
+            var wbm = UnitySingleton<GameManager>.Instance?.workBucketManager;
+            if (wbm?.itemByItemIDRO != null && wbm.itemByItemIDRO.TryGetValue(itemID, out var item) && item != null)
+                return item.weight;
+            return 0f;
+        }
+
+        /// <summary>
+        /// Weight of the work a request still offers: its unreserved count times
+        /// the item's weight. For a Deliver request that's the remaining deficit;
+        /// for a move-out, what's waiting to be picked up.
+        /// </summary>
+        internal static float RequestLoadWeight(ItemRequest request)
+        {
+            if (request == null) return 0f;
+            uint count = request.GetTotalUnreservedCount();
+            if (count == 0) return 0f;
+            float weight = request is SingleItemRequest single ? ItemWeight(single.itemID) : 0f;
+            if (weight <= 0f) weight = MultiItemWeightEstimate;
+            return count * weight;
+        }
+
+        /// <summary>
+        /// The smallest load (by weight) worth sending this wagon for, from the
+        /// Minimum Wagon Load setting. 0 when the rule is off.
+        /// </summary>
+        internal static float MinLoadWeight(TransportWagon wagon)
+        {
+            var pref = ManifestDeliveryMod.MinLoadPercent;
+            int percent = pref != null ? pref.Value : 0;
+            if (percent <= 0 || wagon == null) return 0f;
+            return wagon.GetCarryCapacity() * Mathf.Min(percent, 100) / 100f;
+        }
+
+        /// <summary>True when the request alone is worth a trip for this wagon.</summary>
+        internal static bool MeetsMinLoad(TransportWagon wagon, ItemRequest request)
+        {
+            float min = MinLoadWeight(wagon);
+            return min <= 0f || RequestLoadWeight(request) >= min;
+        }
+
         /// <summary>
         /// Every building this wagon is currently assigned to (vanilla's
         /// storage-quota assignments plus pending MD claims), built once per

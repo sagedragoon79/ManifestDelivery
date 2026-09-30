@@ -67,15 +67,22 @@ namespace ManifestDelivery.Components
             return true;
         }
 
-        /// <summary>Claims every active delivery and move-out request on a building, one by one.</summary>
-        public int ClaimRequester(TransportWagon wagon, LogisticsRequester requester)
+        /// <summary>
+        /// Claims a building's active delivery and move-out requests, one by one.
+        /// Pass the same test the scan used to pick the building as
+        /// <paramref name="include"/>: claiming everything let vanilla pick a
+        /// request the scan never approved — e.g. a camp Foundry picked for its
+        /// big iron output got its 5-coal input request served instead.
+        /// </summary>
+        public int ClaimRequester(TransportWagon wagon, LogisticsRequester requester,
+            System.Predicate<ItemRequest>? include = null)
         {
             if (requester == null) return 0;
             int claimed = 0;
             foreach (var kv in requester.activeDeliveryRequests)
-                if (ClaimRequest(wagon, kv.Value)) claimed++;
+                if ((include == null || include(kv.Value)) && ClaimRequest(wagon, kv.Value)) claimed++;
             foreach (var kv in requester.activeMoveOutRequests)
-                if (ClaimRequest(wagon, kv.Value)) claimed++;
+                if ((include == null || include(kv.Value)) && ClaimRequest(wagon, kv.Value)) claimed++;
             return claimed;
         }
 

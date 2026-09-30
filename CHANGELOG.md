@@ -24,6 +24,20 @@ All notable changes to this mod, newest first. Format follows
     where a Strength slider sets how far haulers will travel for priority.
   - Saved per settlement, and follows a storage that you relocate.
   - Inspired by *Storage Priorities* by 3am.
+- **Camp Multi-Pickup (experimental, off by default).** When a Camp wagon
+  picks up a producer's output, it also stops at other camp producers of the
+  same item nearby — including ones that aren't full yet — up to its carry
+  capacity and the destination's free space,
+  then makes one trip to storage instead of one trip per producer. The extra
+  stops reserve their items the same way the game's own trips do, so no other
+  hauler double-books them. Set the number of extra stops (default 3) and how
+  far they may be from the first pickup (default 80) in Keep Clarity under
+  Manifest Delivery → Wagon Efficiency.
+- **Minimum Wagon Load.** MD now sends a wagon only for a job that fills at
+  least 20% of its carry capacity (adjustable; 0 turns it off). Wagons no
+  longer cross town for a handful of items. Camp supplies for camp homes are
+  exempt, and with Camp Multi-Pickup on, a Camp wagon counts the same item at
+  nearby camp producers toward the minimum.
 
 ### Fixed
 - **Wagons stayed tied to buildings they claimed long ago.** MD claimed work
@@ -33,6 +47,11 @@ All notable changes to this mod, newest first. Format follows
   kept serving town until you reloaded. Claims are now made one request at a
   time and released as soon as a route is planned, or when the wagon parks,
   changes mode, or leaves its shop.
+- **Camp wagons made tiny restock runs to camp workshops.** Claiming a camp
+  producer for its output also claimed its input deliveries, so a Camp wagon
+  could set out with 5 coal for a Foundry. Camp wagons now claim only the
+  output they came for, and every mode claims only the jobs that pass its load
+  checks.
 - **Hub wagons skipped some restock jobs until you reloaded.** With Hub
   Multi-Source Pickup on, a claim that didn't lead to a trip was never
   released, so other Hub wagons treated that job as already covered.

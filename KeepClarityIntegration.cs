@@ -154,6 +154,26 @@ namespace ManifestDelivery
                 NewMeta("Relocation Speed Multiplier", min: 0.5f, max: 5.0f,
                     tooltip: "How fast the cart 'drives' itself to a rally point"));
 
+            // === Wagon Efficiency ===
+            // Live: read on every claim scan and every route build.
+            Reg("Wagon Efficiency", ManifestDeliveryMod.MinLoadPercent,
+                NewMeta("Minimum Wagon Load (%)", min: 0, max: 100,
+                    tooltip: "MD only sends a wagon for a job that fills at least this share of it " +
+                             "(by weight). Smaller jobs are left to villagers or wait until they grow. " +
+                             "Camp supplies for camp homes are exempt. 0 turns it off. Default 20."));
+            Reg("Wagon Efficiency", ManifestDeliveryMod.CampMultiPickup,
+                NewMeta("Camp Multi-Pickup (experimental)",
+                    "Camp wagons also stop at other camp producers of the same item on the way, " +
+                    "then make one trip to storage with a fuller load."));
+            Reg("Wagon Efficiency", ManifestDeliveryMod.CampMultiPickupMaxStops,
+                NewMeta("Max Extra Stops", min: 1, max: 6,
+                    tooltip: "How many extra producers a Camp wagon may visit on one trip. Default 3.",
+                    visibleWhen: () => ManifestDeliveryMod.CampMultiPickup.Value));
+            Reg("Wagon Efficiency", ManifestDeliveryMod.CampMultiPickupDetour,
+                NewMeta("Max Detour", min: 20f, max: 250f,
+                    tooltip: "An extra stop must be within this many units of the original pickup. Default 80.",
+                    visibleWhen: () => ManifestDeliveryMod.CampMultiPickup.Value));
+
             // === Storage Priorities ===
             // Live: the routing postfix reads both on every score, and the
             // window rows re-check the toggle each time a window opens.

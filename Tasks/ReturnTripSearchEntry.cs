@@ -150,7 +150,9 @@ namespace ManifestDelivery.Tasks
             //    next and are released once it builds a route.
             try
             {
-                _data.ClaimRequester(_wagon, best);
+                bool isCampMode = _data.ShopEnhancement != null
+                                  && _data.ShopEnhancement.Mode == Components.ShopMode.Camp;
+                _data.ClaimRequester(_wagon, best, request => IsClaimable(request, isCampMode));
 
                 if (ManifestDeliveryMod.IsVerbose)
                 {
@@ -386,31 +388,28 @@ namespace ManifestDelivery.Tasks
         /// </summary>
         private bool HasEligibleRequest(LogisticsRequester requester, bool isCampMode)
         {
-            // Camp mode: look for firewood/food delivery requests on camp buildings
-            if (isCampMode)
-            {
-                foreach (var kv in requester.activeDeliveryRequests)
-                {
-                    if (IsCampBackhaulRequest(kv.Value))
-                        return true;  // No bulk threshold — camp buildings take any amount
-                }
-                // Fall through and also check move-out (shouldn't fire normally
-                // since CampHaul handles pickups, but safety for edge cases)
-            }
-
-            // Standard: delivery requests with bulk check
             foreach (var kv in requester.activeDeliveryRequests)
-            {
-                if (PassesBulkCheck(kv.Value)) return true;
-            }
+                if (IsClaimable(kv.Value, isCampMode)) return true;
 
             // Move-out requests (things the wagon takes FROM this building).
             foreach (var kv in requester.activeMoveOutRequests)
-            {
-                if (PassesBulkCheck(kv.Value)) return true;
-            }
+                if (IsClaimable(kv.Value, isCampMode)) return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// The per-request test, shared by the scan and the claim so the wagon is
+        /// only ever claimed onto requests the scan approved. In Camp mode,
+        /// firewood/food/beer deliveries to camp buildings qualify at any amount
+        /// (camps take what they can get); everything else needs the bulk check
+        /// plus Minimum Wagon Load.
+        /// </summary>
+        private bool IsClaimable(ItemRequest request, bool isCampMode)
+        {
+            if (isCampMode && request.action == ItemAction.Deliver && IsCampBackhaulRequest(request))
+                return true;
+            return PassesBulkCheck(request) && ClaimHelpers.MeetsMinLoad(_wagon, request);
         }
 
         /// <summary>

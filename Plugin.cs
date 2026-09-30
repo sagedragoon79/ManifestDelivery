@@ -31,6 +31,10 @@ namespace ManifestDelivery
         public static MelonPreferences_Entry<bool>  CampHaulEnabled { get; private set; } = null!;
         public static MelonPreferences_Entry<bool>  HubHaulEnabled  { get; private set; } = null!;
         public static MelonPreferences_Entry<bool>  HubMultiSourcePickup { get; private set; } = null!;
+        public static MelonPreferences_Entry<int>   MinLoadPercent          { get; private set; } = null!;
+        public static MelonPreferences_Entry<bool>  CampMultiPickup         { get; private set; } = null!;
+        public static MelonPreferences_Entry<int>   CampMultiPickupMaxStops { get; private set; } = null!;
+        public static MelonPreferences_Entry<float> CampMultiPickupDetour   { get; private set; } = null!;
         public static MelonPreferences_Entry<float> CampWorkRadius  { get; private set; } = null!;
         public static MelonPreferences_Entry<float> HubWorkRadius   { get; private set; } = null!;
 
@@ -260,6 +264,40 @@ namespace ManifestDelivery
                               "near-empty pickup per trip. Hub mode only (Camp is unaffected). " +
                               "Default false — flip on to test, watch Haul Diagnostics for " +
                               "multi-PICKUP hauls.");
+
+            // ── Wagon efficiency ─────────────────────────────────────────────
+            MinLoadPercent = cat.CreateEntry(
+                "MinLoadPercent", 20,
+                display_name: "Minimum Wagon Load (%)",
+                description:  "MD only sends a wagon for a job when it fills at least this " +
+                              "percent of the wagon's carry capacity (by weight). Stops wagons " +
+                              "crossing town for a handful of items; smaller jobs are left to " +
+                              "villagers or wait until they grow. Camp supplies (firewood and " +
+                              "food for camp homes) are exempt. With Camp Multi-Pickup on, a " +
+                              "Camp wagon counts the same item at nearby camp producers too. " +
+                              "0 turns the rule off. Default 20.");
+
+            CampMultiPickup = cat.CreateEntry(
+                "CampMultiPickup", false,
+                display_name: "Camp Multi-Pickup (experimental)",
+                description:  "EXPERIMENTAL. When a Camp wagon picks up a producer's output, " +
+                              "it also stops at other camp producers of the same item on the " +
+                              "way, up to its carry capacity and the destination's free space, " +
+                              "then makes one trip to storage. The extra stops reserve their " +
+                              "items the same way the game's own trips do. Default false.");
+
+            CampMultiPickupMaxStops = cat.CreateEntry(
+                "CampMultiPickupMaxStops", 3,
+                display_name: "Camp Multi-Pickup — Max Extra Stops",
+                description:  "How many extra producers a Camp wagon may visit on one trip. " +
+                              "Default 3.");
+
+            CampMultiPickupDetour = cat.CreateEntry(
+                "CampMultiPickupDetour", 80f,
+                display_name: "Camp Multi-Pickup — Max Detour",
+                description:  "An extra stop must be within this many world units of the " +
+                              "producer the trip was planned for. Keeps the extra stops from " +
+                              "zig-zagging across a large camp. Default 80.");
 
             CampWorkRadius = cat.CreateEntry(
                 "CampWorkRadius", 120f,

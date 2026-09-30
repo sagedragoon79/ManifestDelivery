@@ -153,7 +153,9 @@ namespace ManifestDelivery.Tasks
                 }
                 else
                 {
-                    _data.ClaimRequester(_wagon, best);
+                    // Only the requests the scan approved (bulk + minimum load).
+                    _data.ClaimRequester(_wagon, best,
+                        request => PassesBulkCheck(request) && ClaimHelpers.MeetsMinLoad(_wagon, request));
 
                     if (ManifestDeliveryMod.IsVerbose)
                     {
@@ -250,8 +252,10 @@ namespace ManifestDelivery.Tasks
         /// </summary>
         private bool HasEligibleRequest(LogisticsRequester requester)
         {
+            // Bulk check (vanilla's minimum) plus MD's Minimum Wagon Load, so a
+            // Hub wagon doesn't cross town for a handful of items.
             foreach (var kv in requester.activeDeliveryRequests)
-                if (PassesBulkCheck(kv.Value)) return true;
+                if (PassesBulkCheck(kv.Value) && ClaimHelpers.MeetsMinLoad(_wagon, kv.Value)) return true;
 
             // Multi-source mode never selects a requester for its TakeOut work —
             // a claimed TakeOut request routes single-source (FindBestRouteTakeOut),
@@ -262,7 +266,7 @@ namespace ManifestDelivery.Tasks
                 return false;
 
             foreach (var kv in requester.activeMoveOutRequests)
-                if (PassesBulkCheck(kv.Value)) return true;
+                if (PassesBulkCheck(kv.Value) && ClaimHelpers.MeetsMinLoad(_wagon, kv.Value)) return true;
 
             return false;
         }
@@ -275,7 +279,7 @@ namespace ManifestDelivery.Tasks
         private ItemRequest? GetEligibleDeliverRequest(LogisticsRequester requester)
         {
             foreach (var kv in requester.activeDeliveryRequests)
-                if (PassesBulkCheck(kv.Value)) return kv.Value;
+                if (PassesBulkCheck(kv.Value) && ClaimHelpers.MeetsMinLoad(_wagon, kv.Value)) return kv.Value;
             return null;
         }
 
