@@ -5,7 +5,7 @@ All notable changes to this mod, newest first. Format follows
 
 ---
 
-## [Unreleased]
+## [1.1.0] — 2026-09-30
 
 ### Added
 - **Storage Priorities (experimental, off by default).** Give storage buildings
@@ -93,11 +93,16 @@ All notable changes to this mod, newest first. Format follows
 - **The mode key misfired.** Key combinations such as `Shift+M` now work, the
   modifiers must match exactly (so Ctrl+Shift+M, the stats report, no longer
   also cycles the mode), and the key is ignored while you type in a text field.
-- **Hub's +20% capacity missed newly built wagons** until a mode change or tech
+- **Hub's capacity bonus missed newly built wagons** until a mode change or tech
   unlock.
 - The Hub tooltip now describes what Hub mode does: it serves deliveries and
   pickups anywhere in its radius, and its wagons help carry water to building
   fires.
+
+### Internal
+- Version bump `1.0.21.0` → `1.1.0.0`.
+- Haul Diagnostics (off by default) now names each stop's building, position,
+  priority, and the request it serves.
 
 ---
 
